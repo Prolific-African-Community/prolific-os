@@ -13,30 +13,303 @@ enum UserRole {
   LP
 }
 
+enum PlatformRole {
+  SUPER_ADMIN
+  PLATFORM_SUPPORT
+  NONE
+}
+
+enum OrganizationType {
+  ASSET_MANAGER
+  GP
+  FIDUCIARY
+  COMPANY
+  FAMILY_OFFICE
+  OTHER
+}
+
+enum OrganizationRole {
+  ORG_ADMIN
+  ORG_ACCOUNTANT
+  ORG_REVIEWER
+  ORG_VIEWER
+}
+
+enum OrganizationStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum EntityType {
+  COMPANY
+  FUND
+  SPV
+  HOLDING
+  FAMILY_OFFICE
+  PORTFOLIO
+  OTHER
+}
+
+enum EntityRole {
+  ENTITY_ADMIN
+  ENTITY_ACCOUNTANT
+  ENTITY_REVIEWER
+  ENTITY_VIEWER
+  INVESTOR
+}
+
+enum AccountingStandard {
+  LUX_GAAP
+  IFRS
+  FRENCH_GAAP
+  OHADA
+  OTHER
+}
+
+enum AccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  INCOME
+  EXPENSE
+}
+
+enum AccountingPeriodStatus {
+  OPEN
+  CLOSED
+  LOCKED
+}
+
+enum CounterpartyType {
+  CLIENT
+  SUPPLIER
+  INVESTOR
+  BANK
+  EMPLOYEE
+  TAX_AUTHORITY
+  RELATED_PARTY
+  OTHER
+}
+
 enum TransactionType {
   CREDIT
   DEBIT
+  CUSTOMER_INVOICE
+  CUSTOMER_PAYMENT
+  SUPPLIER_INVOICE
+  SUPPLIER_PAYMENT
+  BANK_FEE
+  LOAN_RECEIVED
+  LOAN_REPAYMENT
+  CAPITAL_CONTRIBUTION
+  CAPITAL_CALL
+  INVESTOR_CONTRIBUTION
+  INVESTMENT_ACQUISITION
+  INVESTMENT_DISPOSAL
+  DISTRIBUTION
+  VALUATION_ADJUSTMENT
+  FX_ADJUSTMENT
+  TRANSFER
+  MANUAL_ADJUSTMENT
+}
+
+enum TransactionStatus {
+  DRAFT
+  CONFIRMED
+  POSTED
+  CANCELLED
+}
+
+enum JournalEntryStatus {
+  DRAFT
+  POSTED
+  REVERSED
+}
+
+enum DocumentType {
+  INVOICE
+  RECEIPT
+  BANK_STATEMENT
+  CONTRACT
+  REPORT
+  INVESTOR_REPORT
+  CAPITAL_CALL_NOTICE
+  DISTRIBUTION_NOTICE
+  OTHER
 }
 
 model User {
+  id                          String                @id @default(cuid())
+  email                       String                @unique
+  password                    String
+  role                        UserRole
+  gpId                        String?
+  gp                          Gp?                   @relation(fields: [gpId], references: [id])
+  mustChangePassword          Boolean               @default(false)
+  platformRole                PlatformRole          @default(NONE)
+  createdAt                   DateTime              @default(now())
+  organizationUsers           OrganizationUser[]
+  entityUsers                 EntityUser[]
+  createdBusinessTransactions BusinessTransaction[] @relation("BusinessTransactionCreatedBy")
+  postedJournalEntries        JournalEntry[]        @relation("JournalEntryPostedBy")
+  createdJournalEntries       JournalEntry[]        @relation("JournalEntryCreatedBy")
+  auditLogs                   AuditLog[]
+}
+
+model Gp {
   id        String   @id @default(cuid())
-  email     String   @unique
-  passwordHash String
-  role      UserRole
+  name      String
+  rcsNumber String
+  address   String
   createdAt DateTime @default(now())
 
-  funds     Fund[] 
+  users User[]
+  funds Fund[]
+}
+
+model Organization {
+  id           String             @id @default(cuid())
+  name         String
+  legalName    String?
+  type         OrganizationType   @default(COMPANY)
+  country      String             @default("LU")
+  baseCurrency String             @default("EUR")
+  maxUsers     Int                @default(5)
+  status       OrganizationStatus @default(ACTIVE)
+  isActive     Boolean            @default(true)
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  users        OrganizationUser[]
+  entities     Entity[]
+  funds        Fund[]
+  projects     Project[]
+  auditLogs    AuditLog[]
+}
+
+model OrganizationUser {
+  id             String           @id @default(cuid())
+  organizationId String
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role           OrganizationRole @default(ORG_VIEWER)
+  isActive       Boolean          @default(true)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@unique([organizationId, userId])
+}
+
+model Entity {
+  id                      String                @id @default(cuid())
+  organizationId          String
+  organization            Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name                    String
+  legalName               String?
+  type                    EntityType            @default(COMPANY)
+  country                 String                @default("LU")
+  baseCurrency            String                @default("EUR")
+  accountingStandard      AccountingStandard    @default(LUX_GAAP)
+  accountingTemplateId    String?
+  accountingTemplate      AccountingTemplate?   @relation(fields: [accountingTemplateId], references: [id], onDelete: SetNull)
+  accountingInitializedAt DateTime?
+  fiscalYearStartMonth    Int                   @default(1)
+  fiscalYearStartDay      Int                   @default(1)
+  fiscalYearEndMonth      Int                   @default(12)
+  fiscalYearEndDay        Int                   @default(31)
+  isActive                Boolean               @default(true)
+  createdAt               DateTime              @default(now())
+  updatedAt               DateTime              @updatedAt
+  users                   EntityUser[]
+  funds                   Fund[]
+  projects                Project[]
+  accounts                ChartOfAccount[]
+  accountingPeriods       AccountingPeriod[]
+  counterparties          Counterparty[]
+  transactions            BusinessTransaction[]
+  journalEntries          JournalEntry[]
+  accountingRules         AccountingRule[]
+  documents               Document[]
+  auditLogs               AuditLog[]
+}
+
+model AccountingTemplate {
+  id           String                      @id @default(cuid())
+  name         String
+  version      String                      @default("1.0.0")
+  jurisdiction String                      @default("LU")
+  standard     AccountingStandard          @default(LUX_GAAP)
+  description  String?
+  isSystem     Boolean                     @default(false)
+  isActive     Boolean                     @default(true)
+  createdAt    DateTime                    @default(now())
+  updatedAt    DateTime                    @updatedAt
+  accounts     AccountingTemplateAccount[]
+  rules        AccountingTemplateRule[]
+  entities     Entity[]
+}
+
+model AccountingTemplateAccount {
+  id           String             @id @default(cuid())
+  templateId   String
+  template     AccountingTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  code         String
+  label        String
+  accountClass String
+  type         AccountType
+  isActive     Boolean            @default(true)
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  @@unique([templateId, code])
+}
+
+model AccountingTemplateRule {
+  id                  String             @id @default(cuid())
+  templateId          String
+  template            AccountingTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  transactionType     TransactionType
+  debitAccountCode    String
+  creditAccountCode   String
+  descriptionTemplate String?
+  priority            Int                @default(100)
+  isActive            Boolean            @default(true)
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+}
+
+model EntityUser {
+  id        String     @id @default(cuid())
+  entityId  String
+  entity    Entity     @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      EntityRole @default(ENTITY_VIEWER)
+  isActive  Boolean    @default(true)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  @@unique([entityId, userId])
 }
 
 model Fund {
-  id        String   @id @default(cuid())
-  name      String
-  currency  String
-  ownerId   String
-  owner     User     @relation(fields: [ownerId], references: [id])
+  id             String        @id @default(cuid())
+  name           String
+  currency       String
+  gpId           String
+  gp             Gp            @relation(fields: [gpId], references: [id])
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  entityId       String?
+  entity         Entity?       @relation(fields: [entityId], references: [id], onDelete: SetNull)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  transactions Transaction[]
+
+  transactions         Transaction[]
+  projects             Project[]
+  businessTransactions BusinessTransaction[]
 }
 
 model Transaction {
@@ -52,4 +325,189 @@ model Transaction {
   updatedAt DateTime @updatedAt
 
   @@index([fundId])
+}
+
+model Project {
+  id             String        @id @default(cuid())
+  name           String
+  address        String?
+  budget         Decimal?      @db.Decimal(18, 2)
+  fundId         String?
+  fund           Fund?         @relation(fields: [fundId], references: [id], onDelete: SetNull)
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  entityId       String?
+  entity         Entity?       @relation(fields: [entityId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  businessTransactions BusinessTransaction[]
+  journalLines         JournalLine[]
+
+  @@index([fundId])
+}
+
+model ChartOfAccount {
+  id           String             @id @default(cuid())
+  entityId     String?
+  entity       Entity?            @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  jurisdiction String             @default("LU")
+  standard     AccountingStandard @default(LUX_GAAP)
+  code         String
+  label        String
+  accountClass String
+  type         AccountType
+  isSystem     Boolean            @default(false)
+  isActive     Boolean            @default(true)
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  journalLines JournalLine[]
+  debitRules   AccountingRule[]   @relation("DebitAccountRule")
+  creditRules  AccountingRule[]   @relation("CreditAccountRule")
+
+  @@unique([entityId, code])
+}
+
+model AccountingPeriod {
+  id        String                 @id @default(cuid())
+  entityId  String
+  entity    Entity                 @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  name      String
+  startDate DateTime
+  endDate   DateTime
+  status    AccountingPeriodStatus @default(OPEN)
+  closedAt  DateTime?
+  createdAt DateTime               @default(now())
+  updatedAt DateTime               @updatedAt
+
+  @@unique([entityId, startDate, endDate])
+}
+
+model Counterparty {
+  id           String                @id @default(cuid())
+  entityId     String
+  entity       Entity                @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  name         String
+  type         CounterpartyType
+  email        String?
+  vatNumber    String?
+  country      String?
+  createdAt    DateTime              @default(now())
+  updatedAt    DateTime              @updatedAt
+  transactions BusinessTransaction[]
+  journalLines JournalLine[]
+  documents    Document[]
+}
+
+model BusinessTransaction {
+  id             String            @id @default(cuid())
+  entityId       String
+  entity         Entity            @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  fundId         String?
+  fund           Fund?             @relation(fields: [fundId], references: [id], onDelete: SetNull)
+  projectId      String?
+  project        Project?          @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  counterpartyId String?
+  counterparty   Counterparty?     @relation(fields: [counterpartyId], references: [id], onDelete: SetNull)
+  type           TransactionType
+  amount         Decimal           @db.Decimal(18, 2)
+  currency       String            @default("EUR")
+  date           DateTime
+  description    String?
+  status         TransactionStatus @default(DRAFT)
+  createdById    String?
+  createdBy      User?             @relation("BusinessTransactionCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  journalEntries JournalEntry[]
+  documents      Document[]
+}
+
+model JournalEntry {
+  id            String               @id @default(cuid())
+  entityId      String
+  entity        Entity               @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  transactionId String?
+  transaction   BusinessTransaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+  date          DateTime
+  description   String
+  status        JournalEntryStatus   @default(DRAFT)
+  postedAt      DateTime?
+  postedById    String?
+  postedBy      User?                @relation("JournalEntryPostedBy", fields: [postedById], references: [id], onDelete: SetNull)
+  createdById   String?
+  createdBy     User?                @relation("JournalEntryCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+  lines         JournalLine[]
+}
+
+model JournalLine {
+  id             String         @id @default(cuid())
+  journalEntryId String
+  journalEntry   JournalEntry   @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+  accountId      String
+  account        ChartOfAccount @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  projectId      String?
+  project        Project?       @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  counterpartyId String?
+  counterparty   Counterparty?  @relation(fields: [counterpartyId], references: [id], onDelete: SetNull)
+  debit          Decimal        @default(0) @db.Decimal(18, 2)
+  credit         Decimal        @default(0) @db.Decimal(18, 2)
+  currency       String         @default("EUR")
+  description    String?
+  createdAt      DateTime       @default(now())
+}
+
+model AccountingRule {
+  id                  String          @id @default(cuid())
+  entityId            String?
+  entity              Entity?         @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  transactionType     TransactionType
+  debitAccountId      String
+  debitAccount        ChartOfAccount  @relation("DebitAccountRule", fields: [debitAccountId], references: [id], onDelete: Restrict)
+  creditAccountId     String
+  creditAccount       ChartOfAccount  @relation("CreditAccountRule", fields: [creditAccountId], references: [id], onDelete: Restrict)
+  descriptionTemplate String?
+  priority            Int             @default(100)
+  isActive            Boolean         @default(true)
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+}
+
+model Document {
+  id               String               @id @default(cuid())
+  entityId         String
+  entity           Entity               @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  transactionId    String?
+  transaction      BusinessTransaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+  counterpartyId   String?
+  counterparty     Counterparty?        @relation(fields: [counterpartyId], references: [id], onDelete: SetNull)
+  type             DocumentType
+  fileUrl          String
+  originalFilename String?
+  mimeType         String?
+  status           String               @default("UPLOADED")
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+}
+
+model AuditLog {
+  id             String        @id @default(cuid())
+  userId         String?
+  user           User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  entityId       String?
+  entity         Entity?       @relation(fields: [entityId], references: [id], onDelete: SetNull)
+  entityType     String
+  entityRecordId String
+  action         String
+  resourceType   String
+  resourceId     String?
+  metadata       Json?
+  before         Json?
+  after          Json?
+  createdAt      DateTime      @default(now())
 }

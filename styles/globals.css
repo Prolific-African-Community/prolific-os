@@ -2,7 +2,25 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Ne tue pas tous les box-shadows, sinon Tailwind rings/shadows ne marchent plus */
+html,
+body {
+  margin: 0;
+}
+
+body {
+  font-family: system-ui, sans-serif;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
 button {
-  outline: none;
+  font: inherit;
+}
+
+a {
+  color: inherit;
 }

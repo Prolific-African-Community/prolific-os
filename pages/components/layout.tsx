@@ -34,16 +34,16 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             const active = router.pathname === item.href;
 
             return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`block w-full rounded-2xl px-6 py-4 bg-black font-medium transition-all duration-200 ease-in-out ${
-                  active
-                    ? "bg-black text-white shadow-lg"
-                    : "bg-zinc-100 text-zinc-800 hover:bg-black hover:text-white hover:shadow-lg cursor-pointer"
-                }`}
-              >
-                {item.label}
+              <Link key={item.href} href={item.href}>
+                <a
+                  className={`block w-full rounded-2xl px-6 py-4 bg-black font-medium transition-all duration-200 ease-in-out ${
+                    active
+                      ? "bg-black text-white shadow-lg"
+                      : "bg-zinc-100 text-zinc-800 hover:bg-black hover:text-white hover:shadow-lg cursor-pointer"
+                  }`}
+                >
+                  {item.label}
+                </a>
               </Link>
             );
           })}

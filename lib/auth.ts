@@ -1,19 +1,34 @@
 import type { NextApiHandler, NextApiRequest, NextApiResponse } from 'next';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { UserRole } from '@prisma/client';
+import { OrganizationStatus, PlatformRole, UserRole } from '@prisma/client';
+import { prisma } from './prisma';
 
 const JWT_EXPIRES_IN = '1d';
 
 export interface AuthTokenPayload {
   sub: string;
-  email: string;
+  email?: string;
   role: UserRole;
+  gpId?: string | null;
+}
+
+export interface AuthenticatedUser {
+  id: string;
+  email?: string;
+  role?: string;
+  gpId?: string | null;
+  [key: string]: any;
 }
 
 export interface AuthenticatedNextApiRequest extends NextApiRequest {
-  user: AuthTokenPayload;
+  user: AuthenticatedUser;
 }
+
+export type AuthenticatedNextApiHandler = (
+  req: AuthenticatedNextApiRequest,
+  res: NextApiResponse
+) => Promise<void> | void;
 
 const getJwtSecret = (): string => {
   const secret = process.env.JWT_SECRET;
@@ -52,28 +67,92 @@ const getBearerToken = (req: NextApiRequest): string | null => {
 };
 
 export const withAuth = (
-  handler: NextApiHandler,
+  handler: AuthenticatedNextApiHandler,
   allowedRoles: UserRole[] = [UserRole.ADMIN, UserRole.GP, UserRole.LP]
 ): NextApiHandler => {
   return async (req: NextApiRequest, res: NextApiResponse) => {
     const token = getBearerToken(req);
 
     if (!token) {
-      return res.status(401).json({ message: 'Authorization token is required' });
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
     }
 
     try {
       const payload = verifyAuthToken(token);
 
       if (!allowedRoles.includes(payload.role)) {
-        return res.status(403).json({ message: 'Insufficient permissions' });
+        return res.status(403).json({ success: false, message: 'Forbidden' });
       }
 
-      (req as AuthenticatedNextApiRequest).user = payload;
+      const user = await prisma.user.findUnique({
+        where: { id: payload.sub },
+        select: {
+          role: true,
+          platformRole: true,
+          organizationUsers: {
+            where: { isActive: true },
+            select: {
+              organization: {
+                select: {
+                  isActive: true,
+                  status: true,
+                },
+              },
+            },
+          },
+          entityUsers: {
+            where: { isActive: true },
+            select: {
+              entity: {
+                select: {
+                  organization: {
+                    select: {
+                      isActive: true,
+                      status: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      });
 
-      return handler(req, res);
+      if (!user) {
+        return res.status(401).json({ success: false, message: 'Unauthorized' });
+      }
+
+      const isPlatformAdmin =
+        user.platformRole === PlatformRole.SUPER_ADMIN || user.role === UserRole.ADMIN;
+      const hasTenantMemberships =
+        user.organizationUsers.length > 0 || user.entityUsers.length > 0;
+      const hasActiveOrganization = user.organizationUsers.some(
+        (membership) =>
+          membership.organization.isActive &&
+          membership.organization.status === OrganizationStatus.ACTIVE
+      ) || user.entityUsers.some(
+        (membership) =>
+          membership.entity.organization.isActive &&
+          membership.entity.organization.status === OrganizationStatus.ACTIVE
+      );
+
+      if (!isPlatformAdmin && hasTenantMemberships && !hasActiveOrganization) {
+        return res.status(403).json({
+          success: false,
+          message:
+            'Your organization is currently inactive. Please contact your administrator.',
+        });
+      }
+
+      const authenticatedReq = req as AuthenticatedNextApiRequest;
+      authenticatedReq.user = {
+        ...payload,
+        id: payload.sub,
+      };
+
+      return handler(authenticatedReq, res);
     } catch {
-      return res.status(401).json({ message: 'Invalid or expired token' });
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
     }
   };
 };
