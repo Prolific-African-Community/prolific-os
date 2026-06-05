@@ -14,12 +14,14 @@
   "prisma": {
     "seed": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' prisma/seed.ts"
   },
+  "engines": {
+    "node": "20.x"
+  },
   "dependencies": {
     "@emotion/react": "latest",
     "@emotion/styled": "latest",
     "@mui/material": "latest",
     "@prisma/client": "^5.22.0",
-    "bcrypt": "^6.0.0",
     "bcryptjs": "^2.4.3",
     "jsonwebtoken": "^9.0.2",
     "next": "latest",
@@ -28,7 +30,6 @@
     "react-dom": "latest"
   },
   "devDependencies": {
-    "@types/bcrypt": "^6.0.0",
     "@types/bcryptjs": "^2.4.6",
     "@types/jsonwebtoken": "^9.0.8",
     "@types/node": "^25.6.0",
