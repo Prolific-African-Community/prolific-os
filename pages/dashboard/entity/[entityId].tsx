@@ -50,6 +50,7 @@ interface EntityRecord {
 interface EntityDetailPayload {
   entity: EntityRecord;
   summary: {
+    projectsCount: number;
     counterpartiesCount: number;
     transactionsCount: number;
     documentsCount: number;
@@ -181,9 +182,11 @@ interface JournalLine {
 
 interface JournalEntry {
   id: string;
+  entityId?: string;
   date: string;
   description: string;
   status: "DRAFT" | "POSTED" | "REVERSED";
+  postedAt?: string | null;
   lines: JournalLine[];
 }
 
@@ -196,6 +199,24 @@ interface Transaction {
   status: string;
   description?: string | null;
   counterparty?: Counterparty | null;
+}
+
+interface CreateTransactionResponse {
+  transaction: Transaction;
+  journalEntry: JournalEntry;
+}
+
+interface JournalEntryActionResponse {
+  id: string;
+  entityId: string;
+  transactionId?: string | null;
+  status: "POSTED";
+  postedAt?: string | null;
+  lineCount: number;
+}
+
+interface ReverseJournalEntryResponse extends JournalEntryActionResponse {
+  date: string;
 }
 
 interface AccountingDocument {
@@ -658,6 +679,7 @@ export default function EntityWorkspacePage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [reportsLoading, setReportsLoading] = useState(false);
+  const [loadedSections, setLoadedSections] = useState<Record<string, boolean>>({});
   const [submittingTransaction, setSubmittingTransaction] = useState(false);
   const [submittingProject, setSubmittingProject] = useState(false);
   const [addingCounterparty, setAddingCounterparty] = useState(false);
@@ -772,10 +794,22 @@ export default function EntityWorkspacePage() {
     }
   };
 
-  const loadWorkspace = async (
-    showRefresh = false,
-    filters: ReportFilters = reportFilters
-  ) => {
+  const markLoaded = (section: string) => {
+    setLoadedSections((current) => ({ ...current, [section]: true }));
+  };
+
+  const resetLoaded = (...sections: string[]) => {
+    setLoadedSections((current) => {
+      if (!sections.length) return {};
+      const next = { ...current };
+      sections.forEach((section) => {
+        delete next[section];
+      });
+      return next;
+    });
+  };
+
+  const loadEntityDetail = async (showRefresh = false) => {
     if (!entityId) return;
 
     if (showRefresh) {
@@ -786,57 +820,6 @@ export default function EntityWorkspacePage() {
 
     try {
       const entityData = await request<EntityDetailPayload>(`/api/entities/${entityId}`);
-      const permissions = entityData.permissions;
-      const [
-        projectData,
-        transactionData,
-        journalEntryData,
-        counterpartyData,
-        documentData,
-        accountData,
-        ruleData,
-        templateData,
-        periodData,
-        auditLogData,
-      ] = await Promise.all([
-        request<Project[]>(`/api/entities/${entityId}/projects`),
-        request<Transaction[]>(
-          `/api/accounting/transactions?entityId=${encodeURIComponent(entityId)}`
-        ),
-        request<JournalEntry[]>(
-          `/api/accounting/journal-entries?entityId=${encodeURIComponent(entityId)}`
-        ),
-        request<Counterparty[]>(
-          `/api/accounting/counterparties?entityId=${encodeURIComponent(entityId)}`
-        ),
-        request<AccountingDocument[]>(
-          `/api/accounting/documents?entityId=${encodeURIComponent(entityId)}`
-        ),
-        permissions.canManageAccountingSetup
-          ? request<Account[]>(
-              `/api/accounting/chart-of-accounts?entityId=${encodeURIComponent(
-                entityId
-              )}&includeInactive=true`
-            )
-          : Promise.resolve([]),
-        permissions.canManageAccountingSetup
-          ? request<AccountingRule[]>(
-              `/api/accounting/rules?entityId=${encodeURIComponent(
-                entityId
-              )}&includeInactive=true`
-            )
-          : Promise.resolve([]),
-        permissions.canManageAccountingSetup
-          ? request<AccountingTemplate[]>("/api/accounting/templates")
-          : Promise.resolve([]),
-        request<AccountingPeriod[]>(
-          `/api/accounting/periods?entityId=${encodeURIComponent(entityId)}`
-        ),
-        request<AuditLog[]>(
-          `/api/audit-logs?entityId=${encodeURIComponent(entityId)}&limit=100`
-        ),
-      ]);
-
       setEntityDetail(entityData);
       if (
         activeTab === "setup" &&
@@ -844,22 +827,11 @@ export default function EntityWorkspacePage() {
       ) {
         setActiveTab("overview");
       }
-      setProjects(projectData);
-      setTransactions(transactionData);
-      setJournalEntries(journalEntryData);
-      setCounterparties(counterpartyData);
-      setDocuments(documentData);
-      setAccounts(accountData);
-      setRules(ruleData);
-      setTemplates(templateData);
-      setPeriods(periodData);
-      setAuditLogs(auditLogData);
-      setSelectedTemplateId((current) => current || templateData[0]?.id || "");
       setTransactionForm((current) => ({
         ...current,
         currency: entityData.entity.baseCurrency || current.currency,
       }));
-      await loadReports(filters, showRefresh);
+      markLoaded("entity");
     } catch (loadError) {
       setError(
         loadError instanceof Error
@@ -872,6 +844,170 @@ export default function EntityWorkspacePage() {
     }
   };
 
+  const loadProjects = async () => {
+    if (!entityId) return;
+    const projectData = await request<Project[]>(`/api/entities/${entityId}/projects`);
+    setProjects(projectData);
+    markLoaded("projects");
+  };
+
+  const loadTransactions = async (limit = 50) => {
+    if (!entityId) return;
+    const transactionData = await request<Transaction[]>(
+      `/api/accounting/transactions?entityId=${encodeURIComponent(entityId)}&limit=${limit}`
+    );
+    setTransactions(transactionData);
+    markLoaded("transactions");
+  };
+
+  const loadJournalEntries = async (limit = 50) => {
+    if (!entityId) return;
+    const journalEntryData = await request<JournalEntry[]>(
+      `/api/accounting/journal-entries?entityId=${encodeURIComponent(entityId)}&limit=${limit}`
+    );
+    setJournalEntries(journalEntryData);
+    markLoaded("journalEntries");
+  };
+
+  const loadCounterparties = async () => {
+    if (!entityId) return;
+    const counterpartyData = await request<Counterparty[]>(
+      `/api/accounting/counterparties?entityId=${encodeURIComponent(entityId)}`
+    );
+    setCounterparties(counterpartyData);
+    markLoaded("counterparties");
+  };
+
+  const loadDocuments = async () => {
+    if (!entityId) return;
+    const documentData = await request<AccountingDocument[]>(
+      `/api/accounting/documents?entityId=${encodeURIComponent(entityId)}`
+    );
+    setDocuments(documentData);
+    markLoaded("documents");
+  };
+
+  const loadAccounts = async () => {
+    if (!entityId || !entityDetail?.permissions.canManageAccountingSetup) return;
+    const accountData = await request<Account[]>(
+      `/api/accounting/chart-of-accounts?entityId=${encodeURIComponent(
+        entityId
+      )}&includeInactive=true&limit=1000`
+    );
+    setAccounts(accountData);
+    markLoaded("accounts");
+  };
+
+  const loadRules = async () => {
+    if (!entityId || !entityDetail?.permissions.canManageAccountingSetup) return;
+    const ruleData = await request<AccountingRule[]>(
+      `/api/accounting/rules?entityId=${encodeURIComponent(entityId)}&includeInactive=true`
+    );
+    setRules(ruleData);
+    markLoaded("rules");
+  };
+
+  const loadTemplates = async () => {
+    if (!entityDetail?.permissions.canManageAccountingSetup) return;
+    const templateData = await request<AccountingTemplate[]>("/api/accounting/templates");
+    setTemplates(templateData);
+    setSelectedTemplateId((current) => current || templateData[0]?.id || "");
+    markLoaded("templates");
+  };
+
+  const loadPeriods = async () => {
+    if (!entityId || !entityDetail?.permissions.canManageAccountingSetup) return;
+    const periodData = await request<AccountingPeriod[]>(
+      `/api/accounting/periods?entityId=${encodeURIComponent(entityId)}`
+    );
+    setPeriods(periodData);
+    markLoaded("periods");
+  };
+
+  const loadAuditLogs = async () => {
+    if (!entityId) return;
+    const auditLogData = await request<AuditLog[]>(
+      `/api/audit-logs?entityId=${encodeURIComponent(entityId)}&limit=100`
+    );
+    setAuditLogs(auditLogData);
+    markLoaded("auditLogs");
+  };
+
+  const loadSetupSubTab = async (subTab: SetupSubTab, force = false) => {
+    if (!entityDetail?.permissions.canManageAccountingSetup) return;
+
+    if (subTab === "initialization") {
+      if (force || !loadedSections.templates) await loadTemplates();
+      return;
+    }
+
+    if (subTab === "accounts") {
+      if (force || !loadedSections.accounts) await loadAccounts();
+      return;
+    }
+
+    if (subTab === "rules") {
+      await Promise.all([
+        !force && loadedSections.accounts ? Promise.resolve() : loadAccounts(),
+        !force && loadedSections.rules ? Promise.resolve() : loadRules(),
+      ]);
+      return;
+    }
+
+    if (subTab === "periods") {
+      if (force || !loadedSections.periods) await loadPeriods();
+    }
+  };
+
+  const loadTabData = async (tab: WorkspaceTab, force = false) => {
+    if (!entityId || !entityDetail) return;
+    setError(null);
+
+    try {
+      if (tab === "overview") {
+        await Promise.all([
+          !force && loadedSections.transactions ? Promise.resolve() : loadTransactions(5),
+          !force && loadedSections.journalEntries ? Promise.resolve() : loadJournalEntries(5),
+        ]);
+      } else if (tab === "projects") {
+        if (force || !loadedSections.projects) await loadProjects();
+      } else if (tab === "accounting") {
+        await Promise.all([
+          !force && loadedSections.transactions ? Promise.resolve() : loadTransactions(),
+          !force && loadedSections.projects ? Promise.resolve() : loadProjects(),
+          !force && loadedSections.counterparties ? Promise.resolve() : loadCounterparties(),
+        ]);
+      } else if (tab === "journal") {
+        if (force || !loadedSections.journalEntries) await loadJournalEntries();
+      } else if (tab === "counterparties") {
+        if (force || !loadedSections.counterparties) await loadCounterparties();
+      } else if (tab === "documents") {
+        await Promise.all([
+          !force && loadedSections.documents ? Promise.resolve() : loadDocuments(),
+          !force && loadedSections.counterparties ? Promise.resolve() : loadCounterparties(),
+          !force && loadedSections.transactions ? Promise.resolve() : loadTransactions(),
+        ]);
+      } else if (tab === "reporting") {
+        await Promise.all([
+          !force && loadedSections.accounts ? Promise.resolve() : loadAccounts(),
+          !force && trialBalance && generalLedger
+            ? Promise.resolve()
+            : loadReports(reportFilters, true),
+        ]);
+      } else if (tab === "setup") {
+        await loadSetupSubTab(setupSubTab, force);
+      } else if (tab === "audit") {
+        if (force || !loadedSections.auditLogs) await loadAuditLogs();
+      }
+    } catch (tabError) {
+      setError(
+        tabError instanceof Error
+          ? tabError.message
+          : "Unable to load workspace data"
+      );
+    }
+  };
+
   useEffect(() => {
     if (!router.isReady || !entityId) return;
 
@@ -880,8 +1016,19 @@ export default function EntityWorkspacePage() {
       return;
     }
 
-    loadWorkspace(false, initialReportFilters());
+    setLoadedSections({});
+    loadEntityDetail(false);
   }, [router.isReady, entityId]);
+
+  useEffect(() => {
+    if (!entityDetail || !entityId) return;
+    loadTabData(activeTab);
+  }, [activeTab, entityDetail?.entity.id]);
+
+  useEffect(() => {
+    if (!entityDetail || activeTab !== "setup") return;
+    loadSetupSubTab(setupSubTab);
+  }, [setupSubTab, activeTab, entityDetail?.entity.id]);
 
   const filteredProjects = useMemo(() => {
     const query = projectSearch.trim().toLowerCase();
@@ -953,16 +1100,18 @@ export default function EntityWorkspacePage() {
 
   const kpis = useMemo(
     () => ({
-      projects: projects.length,
-      transactions: transactions.length,
-      draftEntries: journalEntries.filter((entry) => entry.status === "DRAFT")
-        .length,
-      postedEntries: journalEntries.filter((entry) => entry.status === "POSTED")
-        .length,
-      counterparties: counterparties.length,
-      documents: documents.length,
+      projects: entityDetail?.summary.projectsCount ?? projects.length,
+      transactions: entityDetail?.summary.transactionsCount ?? transactions.length,
+      draftEntries:
+        entityDetail?.summary.journalEntries.draft ??
+        journalEntries.filter((entry) => entry.status === "DRAFT").length,
+      postedEntries:
+        entityDetail?.summary.journalEntries.posted ??
+        journalEntries.filter((entry) => entry.status === "POSTED").length,
+      counterparties: entityDetail?.summary.counterpartiesCount ?? counterparties.length,
+      documents: entityDetail?.summary.documentsCount ?? documents.length,
     }),
-    [projects, transactions, journalEntries, counterparties, documents]
+    [entityDetail, projects, transactions, journalEntries, counterparties, documents]
   );
 
   const recentTransactions = useMemo(() => transactions.slice(0, 5), [transactions]);
@@ -987,6 +1136,19 @@ export default function EntityWorkspacePage() {
     [accounts]
   );
 
+  const updateEntitySummary = (
+    updater: (summary: EntityDetailPayload["summary"]) => EntityDetailPayload["summary"]
+  ) => {
+    setEntityDetail((current) =>
+      current
+        ? {
+            ...current,
+            summary: updater(current.summary),
+          }
+        : current
+    );
+  };
+
   const handleTransactionSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!entityId) return;
@@ -996,7 +1158,7 @@ export default function EntityWorkspacePage() {
     setSuccess(null);
 
     try {
-      await request("/api/accounting/transactions", {
+      const payload = await request<CreateTransactionResponse>("/api/accounting/transactions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1015,8 +1177,18 @@ export default function EntityWorkspacePage() {
         ...initialTransactionForm(),
         currency: entityDetail?.entity.baseCurrency || "EUR",
       });
+      setTransactions((current) => [payload.transaction, ...current].slice(0, 50));
+      setJournalEntries((current) => [payload.journalEntry, ...current].slice(0, 50));
+      updateEntitySummary((summary) => ({
+        ...summary,
+        transactionsCount: summary.transactionsCount + 1,
+        journalEntries: {
+          ...summary.journalEntries,
+          total: summary.journalEntries.total + 1,
+          draft: summary.journalEntries.draft + 1,
+        },
+      }));
       setSuccess("Transaction created. Draft journal entry generated.");
-      await loadWorkspace(false, reportFilters);
       selectTab("journal");
     } catch (submitError) {
       setError(
@@ -1038,7 +1210,7 @@ export default function EntityWorkspacePage() {
     setSuccess(null);
 
     try {
-      await request(`/api/entities/${entityId}/projects`, {
+      const project = await request<Project>(`/api/entities/${entityId}/projects`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1049,8 +1221,12 @@ export default function EntityWorkspacePage() {
       });
 
       setProjectForm(initialProjectForm());
+      setProjects((current) => [project, ...current]);
+      updateEntitySummary((summary) => ({
+        ...summary,
+        projectsCount: summary.projectsCount + 1,
+      }));
       setSuccess("Project created inside the entity workspace.");
-      await loadWorkspace(false, reportFilters);
     } catch (projectError) {
       setError(
         projectError instanceof Error
@@ -1071,17 +1247,55 @@ export default function EntityWorkspacePage() {
     setSuccess(null);
 
     try {
-      await request(
-        `/api/accounting/journal-entries/${journalEntryId}/${action}`,
-        { method: "POST" }
-      );
+      if (action === "post") {
+        const payload = await request<JournalEntryActionResponse>(
+          `/api/accounting/journal-entries/${journalEntryId}/${action}`,
+          { method: "POST" }
+        );
+
+        setJournalEntries((current) =>
+          current.map((entry) =>
+            entry.id === payload.id
+              ? {
+                  ...entry,
+                  status: "POSTED",
+                  postedAt: payload.postedAt || null,
+                }
+              : entry
+          )
+        );
+        updateEntitySummary((summary) => ({
+          ...summary,
+          journalEntries: {
+            ...summary.journalEntries,
+            draft: Math.max(0, summary.journalEntries.draft - 1),
+            posted: summary.journalEntries.posted + 1,
+          },
+        }));
+      } else {
+        await request<ReverseJournalEntryResponse>(
+          `/api/accounting/journal-entries/${journalEntryId}/${action}`,
+          { method: "POST" }
+        );
+        resetLoaded("journalEntries");
+        await loadJournalEntries();
+        updateEntitySummary((summary) => ({
+          ...summary,
+          journalEntries: {
+            ...summary.journalEntries,
+            total: summary.journalEntries.total + 1,
+            posted: summary.journalEntries.posted + 1,
+          },
+        }));
+      }
 
       setSuccess(
         action === "post"
           ? "Journal entry posted successfully."
           : "Reversal journal entry created successfully."
       );
-      await loadWorkspace(false, reportFilters);
+      setTrialBalance(null);
+      setGeneralLedger(null);
     } catch (actionError) {
       setError(
         actionError instanceof Error
@@ -1123,8 +1337,12 @@ export default function EntityWorkspacePage() {
         ...current,
         counterpartyId: counterparty.id,
       }));
+      setCounterparties((current) => [counterparty, ...current]);
+      updateEntitySummary((summary) => ({
+        ...summary,
+        counterpartiesCount: summary.counterpartiesCount + 1,
+      }));
       setSuccess("Counterparty added and available for transaction entry.");
-      await loadWorkspace(false, reportFilters);
     } catch (counterpartyError) {
       setError(
         counterpartyError instanceof Error
@@ -1145,7 +1363,7 @@ export default function EntityWorkspacePage() {
     setSuccess(null);
 
     try {
-      await request<AccountingDocument>("/api/accounting/documents", {
+      const document = await request<AccountingDocument>("/api/accounting/documents", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1160,8 +1378,12 @@ export default function EntityWorkspacePage() {
       });
 
       setDocumentForm(initialDocumentForm());
+      setDocuments((current) => [document, ...current]);
+      updateEntitySummary((summary) => ({
+        ...summary,
+        documentsCount: summary.documentsCount + 1,
+      }));
       setSuccess("Document linked to this entity workspace.");
-      await loadWorkspace(false, reportFilters);
     } catch (documentError) {
       setError(
         documentError instanceof Error
@@ -1204,7 +1426,8 @@ export default function EntityWorkspacePage() {
       setAccountForm(initialAccountForm());
       setAccountPreview(null);
       setSuccess("Account created.");
-      await loadWorkspace(false, reportFilters);
+      resetLoaded("accounts");
+      await Promise.all([loadEntityDetail(false), loadAccounts()]);
     } catch (accountError) {
       setError(
         accountError instanceof Error
@@ -1271,7 +1494,8 @@ export default function EntityWorkspacePage() {
       setSuccess(
         account.isActive ? "Account deactivated." : "Account activated."
       );
-      await loadWorkspace(false, reportFilters);
+      resetLoaded("accounts");
+      await loadAccounts();
     } catch (accountError) {
       setError(
         accountError instanceof Error
@@ -1308,7 +1532,8 @@ export default function EntityWorkspacePage() {
 
       setRuleForm(initialRuleForm());
       setSuccess("Accounting rule created.");
-      await loadWorkspace(false, reportFilters);
+      resetLoaded("rules");
+      await loadRules();
     } catch (ruleError) {
       setError(
         ruleError instanceof Error ? ruleError.message : "Unable to create rule"
@@ -1341,7 +1566,8 @@ export default function EntityWorkspacePage() {
 
       setApplyTemplateResult(result);
       setSuccess("Accounting template applied.");
-      await loadWorkspace(false, reportFilters);
+      resetLoaded("accounts", "rules");
+      await Promise.all([loadEntityDetail(false), loadAccounts(), loadRules()]);
       setSetupSubTab("accounts");
     } catch (templateError) {
       setError(
@@ -1367,7 +1593,8 @@ export default function EntityWorkspacePage() {
       });
 
       setSuccess(rule.isActive ? "Rule deactivated." : "Rule activated.");
-      await loadWorkspace(false, reportFilters);
+      resetLoaded("rules");
+      await loadRules();
     } catch (ruleError) {
       setError(
         ruleError instanceof Error ? ruleError.message : "Unable to update rule"
@@ -1391,7 +1618,8 @@ export default function EntityWorkspacePage() {
       });
       setPeriodForm(initialPeriodForm());
       setSuccess("Accounting period created.");
-      await loadWorkspace(false, reportFilters);
+      resetLoaded("periods");
+      await loadPeriods();
     } catch (periodError) {
       setError(periodError instanceof Error ? periodError.message : "Unable to create period");
     } finally {
@@ -1413,7 +1641,8 @@ export default function EntityWorkspacePage() {
         body: JSON.stringify({ status }),
       });
       setSuccess(`Accounting period set to ${status}.`);
-      await loadWorkspace(false, reportFilters);
+      resetLoaded("periods");
+      await loadPeriods();
     } catch (periodError) {
       setError(periodError instanceof Error ? periodError.message : "Unable to update period");
     } finally {
@@ -1494,7 +1723,11 @@ export default function EntityWorkspacePage() {
             </button>
             <button
               type="button"
-              onClick={() => loadWorkspace(true, reportFilters)}
+              onClick={async () => {
+                resetLoaded();
+                await loadEntityDetail(true);
+                await loadTabData(activeTab, true);
+              }}
               disabled={refreshing}
               className={BUTTON_DARK}
             >
@@ -2158,7 +2391,15 @@ export default function EntityWorkspacePage() {
               <button
                 type="button"
                 disabled={refreshing}
-                onClick={() => loadWorkspace(true, reportFilters)}
+                onClick={async () => {
+                  resetLoaded("journalEntries");
+                  setRefreshing(true);
+                  try {
+                    await loadJournalEntries();
+                  } finally {
+                    setRefreshing(false);
+                  }
+                }}
                 className={BUTTON_DARK}
               >
                 {refreshing ? "Refreshing..." : "Refresh"}
@@ -2236,7 +2477,7 @@ export default function EntityWorkspacePage() {
                                     }
                                     className="rounded-full bg-blue-500 px-3 py-2 text-[10px] font-semibold text-white transition hover:bg-blue-600 disabled:opacity-50"
                                   >
-                                    {entryIsLoading ? "..." : "Post"}
+                                    {entryIsLoading ? "Posting..." : "Post"}
                                   </button>
                                 )}
                                 {entry.status === "POSTED" &&
@@ -2249,7 +2490,7 @@ export default function EntityWorkspacePage() {
                                     }
                                     className="rounded-full bg-black px-3 py-2 text-[10px] font-semibold text-white transition hover:bg-slate-800 disabled:opacity-50"
                                   >
-                                    {entryIsLoading ? "..." : "Reverse"}
+                                    {entryIsLoading ? "Reversing..." : "Reverse"}
                                   </button>
                                 )}
                               </div>

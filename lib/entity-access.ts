@@ -2,12 +2,36 @@ import { EntityRole, OrganizationRole, OrganizationStatus, PlatformRole, Prisma,
 import { prisma } from './prisma';
 
 export type CurrentUserRecord = Prisma.UserGetPayload<{
-  include: {
-    gp: true;
-    entityUsers: true;
+  select: {
+    id: true;
+    role: true;
+    platformRole: true;
+    gpId: true;
+    gp: {
+      select: {
+        id: true;
+      };
+    };
+    entityUsers: {
+      select: {
+        entityId: true;
+        role: true;
+        isActive: true;
+      };
+    };
     organizationUsers: {
-      include: {
-        organization: true;
+      select: {
+        organizationId: true;
+        role: true;
+        isActive: true;
+        organization: {
+          select: {
+            id: true;
+            isActive: true;
+            status: true;
+            createdAt: true;
+          };
+        };
       };
     };
   };
@@ -16,12 +40,36 @@ export type CurrentUserRecord = Prisma.UserGetPayload<{
 export const getCurrentUserRecord = async (userId: string) => {
   return prisma.user.findUnique({
     where: { id: userId },
-    include: {
-      gp: true,
-      entityUsers: true,
+    select: {
+      id: true,
+      role: true,
+      platformRole: true,
+      gpId: true,
+      gp: {
+        select: {
+          id: true,
+        },
+      },
+      entityUsers: {
+        select: {
+          entityId: true,
+          role: true,
+          isActive: true,
+        },
+      },
       organizationUsers: {
-        include: {
-          organization: true,
+        select: {
+          organizationId: true,
+          role: true,
+          isActive: true,
+          organization: {
+            select: {
+              id: true,
+              isActive: true,
+              status: true,
+              createdAt: true,
+            },
+          },
         },
       },
     },
@@ -44,14 +92,11 @@ export const getAccessibleEntityIds = async (user: CurrentUserRecord) => {
     return entities.map((entity) => entity.id);
   }
 
-  const entityIds = new Set(
-    user.entityUsers
-      .filter(
-        (membership) =>
-          membership.isActive && membership.role !== EntityRole.INVESTOR
-      )
-      .map((membership) => membership.entityId)
-  );
+  const directEntityIds = user.entityUsers
+    .filter(
+      (membership) => membership.isActive && membership.role !== EntityRole.INVESTOR
+    )
+    .map((membership) => membership.entityId);
 
   const organizationIds = user.organizationUsers
     .filter(
@@ -62,49 +107,26 @@ export const getAccessibleEntityIds = async (user: CurrentUserRecord) => {
     )
     .map((membership) => membership.organizationId);
 
-  if (organizationIds.length) {
-    const organizationEntities = await prisma.entity.findMany({
-      where: {
-        organizationId: { in: organizationIds },
-        isActive: true,
-      },
-      select: { id: true },
-    });
-
-    for (const entity of organizationEntities) {
-      entityIds.add(entity.id);
-    }
-  }
-
-  if (user.gpId) {
-    const legacyFundEntities = await prisma.fund.findMany({
-      where: {
-        gpId: user.gpId,
-        entityId: { not: null },
-      },
-      select: { entityId: true },
-    });
-
-    for (const fund of legacyFundEntities) {
-      if (fund.entityId) {
-        entityIds.add(fund.entityId);
-      }
-    }
-  }
-
-  const candidateEntityIds = Array.from(entityIds);
-
-  if (!candidateEntityIds.length) {
+  if (!directEntityIds.length && !organizationIds.length && !user.gpId) {
     return [];
   }
 
   const activeOrganizationEntities = await prisma.entity.findMany({
     where: {
-      id: { in: candidateEntityIds },
+      isActive: true,
       organization: {
         isActive: true,
         status: OrganizationStatus.ACTIVE,
       },
+      OR: [
+        ...(directEntityIds.length ? [{ id: { in: directEntityIds } }] : []),
+        ...(organizationIds.length
+          ? [{ organizationId: { in: organizationIds } }]
+          : []),
+        ...(user.gpId
+          ? [{ funds: { some: { gpId: user.gpId } } }]
+          : []),
+      ],
     },
     select: { id: true },
   });

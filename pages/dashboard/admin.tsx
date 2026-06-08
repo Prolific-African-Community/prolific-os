@@ -664,7 +664,6 @@ export default function AdminConsolePage() {
                       <th className="px-4 py-3">Status</th>
                       <th className="px-4 py-3">Created</th>
                       <th className="px-5 py-3">Admin email(s)</th>
-                      <th className="px-5 py-3 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-black/5">
@@ -712,53 +711,6 @@ export default function AdminConsolePage() {
                             ? organization.adminEmails.join(", ")
                             : "—"}
                         </td>
-                        <td className="px-5 py-4">
-                          <div className="flex flex-wrap justify-end gap-2">
-                            {organization.status !== "ACTIVE" && (
-                              <button
-                                type="button"
-                                disabled={updatingOrganizationId === organization.id}
-                                onClick={() =>
-                                  handleOrganizationStatus(organization, "ACTIVE")
-                                }
-                                className="rounded-full bg-emerald-600 px-3 py-2 text-[10px] font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50"
-                              >
-                                Activate
-                              </button>
-                            )}
-                            {organization.status !== "INACTIVE" && (
-                              <button
-                                type="button"
-                                disabled={updatingOrganizationId === organization.id}
-                                onClick={() =>
-                                  handleOrganizationStatus(organization, "INACTIVE")
-                                }
-                                className="rounded-full border border-black/10 px-3 py-2 text-[10px] font-semibold text-black/60 transition hover:border-black hover:text-black disabled:opacity-50"
-                              >
-                                Deactivate
-                              </button>
-                            )}
-                            {organization.status !== "SUSPENDED" && (
-                              <button
-                                type="button"
-                                disabled={updatingOrganizationId === organization.id}
-                                onClick={() =>
-                                  handleOrganizationStatus(organization, "SUSPENDED")
-                                }
-                                className="rounded-full bg-red-600 px-3 py-2 text-[10px] font-semibold text-white transition hover:bg-red-700 disabled:opacity-50"
-                              >
-                                Suspend
-                              </button>
-                            )}
-                            <button
-                              type="button"
-                              onClick={() => loadOrganizationUsers(organization.id)}
-                              className="rounded-full bg-black px-3 py-2 text-[10px] font-semibold text-white transition hover:bg-slate-800"
-                            >
-                              Users
-                            </button>
-                          </div>
-                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -781,14 +733,168 @@ export default function AdminConsolePage() {
                 Reset passwords without exposing password hashes. Users are
                 forced to change temporary passwords at next login.
               </p>
+              <label className="mt-4 block">
+                <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-black/50">
+                  Organization
+                </span>
+                <select
+                  value={selectedOrganizationId}
+                  onChange={(event) => {
+                    const organizationId = event.target.value;
+
+                    if (!organizationId) {
+                      setSelectedOrganizationId("");
+                      setOrganizationUsers([]);
+                      setResetUserId("");
+                      setResetPassword("");
+                      return;
+                    }
+
+                    loadOrganizationUsers(organizationId);
+                  }}
+                  className={INPUT}
+                >
+                  <option value="">Search or select an organization...</option>
+                  {organizations.map((organization) => (
+                    <option key={organization.id} value={organization.id}>
+                      {organization.name} · {organization.status}
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
 
             {!selectedOrganization ? (
               <div className="px-5 py-12 text-sm font-medium text-black/45">
-                Select an organization to manage its users.
+                Select an organization above to manage access, users and
+                security controls.
               </div>
             ) : (
-              <div className="grid gap-4 p-5 xl:grid-cols-[0.9fr_1.1fr]">
+              <div className="space-y-4 p-5">
+                <div className="rounded-[1.25rem] border border-black/5 bg-[#f7f7f9] p-4">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                    <div>
+                      <h3 className="text-lg font-semibold tracking-[-0.03em]">
+                        {selectedOrganization.name}
+                      </h3>
+                      <p className="mt-1 text-sm font-medium text-black/45">
+                        {selectedOrganization.legalName || "No legal name set"}
+                      </p>
+                    </div>
+                    <span
+                      className={cn(
+                        "w-fit rounded-full px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.12em]",
+                        organizationStatusClass(selectedOrganization.status)
+                      )}
+                    >
+                      {selectedOrganization.status}
+                    </span>
+                  </div>
+
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-black/40">
+                        Type
+                      </p>
+                      <p className="mt-1 text-sm font-medium text-black/70">
+                        {selectedOrganization.type}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-black/40">
+                        Country / currency
+                      </p>
+                      <p className="mt-1 text-sm font-medium text-black/70">
+                        {selectedOrganization.country} ·{" "}
+                        {selectedOrganization.baseCurrency}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-black/40">
+                        Users
+                      </p>
+                      <p className="mt-1 text-sm font-medium text-black/70">
+                        {selectedOrganization.usersCount} /{" "}
+                        {selectedOrganization.maxUsers}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-black/40">
+                        Entities / created
+                      </p>
+                      <p className="mt-1 text-sm font-medium text-black/70">
+                        {selectedOrganization.entitiesCount} ·{" "}
+                        {formatDate(selectedOrganization.createdAt)}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-[1.25rem] border border-black/5 bg-white p-4">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-black/40">
+                        Organization status
+                      </p>
+                      <p className="mt-1 text-sm font-medium text-black/55">
+                        Status changes immediately affect organization access.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {selectedOrganization.status !== "ACTIVE" && (
+                        <button
+                          type="button"
+                          disabled={updatingOrganizationId === selectedOrganization.id}
+                          onClick={() =>
+                            handleOrganizationStatus(selectedOrganization, "ACTIVE")
+                          }
+                          className="rounded-full bg-emerald-600 px-3 py-2 text-[10px] font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50"
+                        >
+                          Activate
+                        </button>
+                      )}
+                      {selectedOrganization.status !== "INACTIVE" && (
+                        <button
+                          type="button"
+                          disabled={updatingOrganizationId === selectedOrganization.id}
+                          onClick={() =>
+                            handleOrganizationStatus(selectedOrganization, "INACTIVE")
+                          }
+                          className="rounded-full border border-black/10 px-3 py-2 text-[10px] font-semibold text-black/60 transition hover:border-black hover:text-black disabled:opacity-50"
+                        >
+                          Deactivate
+                        </button>
+                      )}
+                      {selectedOrganization.status !== "SUSPENDED" && (
+                        <button
+                          type="button"
+                          disabled={updatingOrganizationId === selectedOrganization.id}
+                          onClick={() =>
+                            handleOrganizationStatus(selectedOrganization, "SUSPENDED")
+                          }
+                          className="rounded-full bg-red-600 px-3 py-2 text-[10px] font-semibold text-white transition hover:bg-red-700 disabled:opacity-50"
+                        >
+                          Suspend
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-[1.25rem] border border-black/5 bg-white p-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-black/40">
+                    Max users
+                  </p>
+                  <p className="mt-1 text-sm font-medium text-black/60">
+                    Max users: {selectedOrganization.maxUsers}
+                  </p>
+                  <p className="mt-1 text-xs font-medium text-black/40">
+                    User limit editing will be handled from this panel when the
+                    update endpoint is added.
+                  </p>
+                </div>
+
+              <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
                 <form
                   onSubmit={handleResetPassword}
                   className="rounded-[1.25rem] border border-black/5 bg-[#f7f7f9] p-5"
@@ -886,6 +992,7 @@ export default function AdminConsolePage() {
                     </div>
                   )}
                 </div>
+              </div>
               </div>
             )}
           </div>

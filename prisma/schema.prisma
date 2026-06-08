@@ -199,6 +199,10 @@ model OrganizationUser {
   updatedAt      DateTime         @updatedAt
 
   @@unique([organizationId, userId])
+  @@index([userId])
+  @@index([organizationId])
+  @@index([userId, isActive])
+  @@index([organizationId, isActive])
 }
 
 model Entity {
@@ -232,6 +236,10 @@ model Entity {
   accountingRules         AccountingRule[]
   documents               Document[]
   auditLogs               AuditLog[]
+
+  @@index([organizationId])
+  @@index([organizationId, isActive])
+  @@index([createdAt])
 }
 
 model AccountingTemplate {
@@ -291,6 +299,10 @@ model EntityUser {
   updatedAt DateTime   @updatedAt
 
   @@unique([entityId, userId])
+  @@index([userId])
+  @@index([entityId])
+  @@index([userId, isActive])
+  @@index([entityId, isActive])
 }
 
 model Fund {
@@ -310,6 +322,11 @@ model Fund {
   transactions         Transaction[]
   projects             Project[]
   businessTransactions BusinessTransaction[]
+
+  @@index([gpId])
+  @@index([entityId])
+  @@index([organizationId])
+  @@index([gpId, entityId])
 }
 
 model Transaction {
@@ -346,6 +363,9 @@ model Project {
   journalLines         JournalLine[]
 
   @@index([fundId])
+  @@index([entityId])
+  @@index([organizationId])
+  @@index([entityId, createdAt])
 }
 
 model ChartOfAccount {
@@ -367,6 +387,8 @@ model ChartOfAccount {
   creditRules  AccountingRule[]   @relation("CreditAccountRule")
 
   @@unique([entityId, code])
+  @@index([entityId])
+  @@index([entityId, isActive])
 }
 
 model AccountingPeriod {
@@ -382,6 +404,9 @@ model AccountingPeriod {
   updatedAt DateTime               @updatedAt
 
   @@unique([entityId, startDate, endDate])
+  @@index([entityId])
+  @@index([entityId, status])
+  @@index([entityId, startDate, endDate])
 }
 
 model Counterparty {
@@ -398,6 +423,9 @@ model Counterparty {
   transactions BusinessTransaction[]
   journalLines JournalLine[]
   documents    Document[]
+
+  @@index([entityId])
+  @@index([entityId, name])
 }
 
 model BusinessTransaction {
@@ -422,6 +450,12 @@ model BusinessTransaction {
   updatedAt      DateTime          @updatedAt
   journalEntries JournalEntry[]
   documents      Document[]
+
+  @@index([entityId])
+  @@index([entityId, createdAt])
+  @@index([entityId, date])
+  @@index([entityId, type])
+  @@index([entityId, status])
 }
 
 model JournalEntry {
@@ -441,6 +475,12 @@ model JournalEntry {
   createdAt     DateTime             @default(now())
   updatedAt     DateTime             @updatedAt
   lines         JournalLine[]
+
+  @@index([entityId])
+  @@index([entityId, status])
+  @@index([entityId, date])
+  @@index([entityId, createdAt])
+  @@index([transactionId])
 }
 
 model JournalLine {
@@ -458,6 +498,11 @@ model JournalLine {
   currency       String         @default("EUR")
   description    String?
   createdAt      DateTime       @default(now())
+
+  @@index([journalEntryId])
+  @@index([accountId])
+  @@index([projectId])
+  @@index([counterpartyId])
 }
 
 model AccountingRule {
@@ -474,6 +519,11 @@ model AccountingRule {
   isActive            Boolean         @default(true)
   createdAt           DateTime        @default(now())
   updatedAt           DateTime        @updatedAt
+
+  @@index([entityId])
+  @@index([entityId, isActive])
+  @@index([entityId, transactionType])
+  @@index([entityId, transactionType, isActive])
 }
 
 model Document {
@@ -491,6 +541,11 @@ model Document {
   status           String               @default("UPLOADED")
   createdAt        DateTime             @default(now())
   updatedAt        DateTime             @updatedAt
+
+  @@index([entityId])
+  @@index([entityId, createdAt])
+  @@index([counterpartyId])
+  @@index([transactionId])
 }
 
 model AuditLog {
@@ -510,4 +565,12 @@ model AuditLog {
   before         Json?
   after          Json?
   createdAt      DateTime      @default(now())
+
+  @@index([entityId])
+  @@index([organizationId])
+  @@index([createdAt])
+  @@index([entityId, createdAt])
+  @@index([resourceType])
+  @@index([action])
+  @@index([entityType, entityRecordId, action])
 }

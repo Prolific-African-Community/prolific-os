@@ -11,6 +11,7 @@ import { AuthenticatedNextApiRequest, withAuth } from '../../../../lib/auth';
 import { getCurrentUserRecord } from '../../../../lib/entity-access';
 import { canViewReports } from '../../../../lib/permissions';
 import { prisma } from '../../../../lib/prisma';
+import { measureApi } from '../../../../lib/performance-log';
 
 export default withAuth(async (req: AuthenticatedNextApiRequest, res: NextApiResponse) => {
   if (req.method !== 'GET') {
@@ -81,7 +82,8 @@ export default withAuth(async (req: AuthenticatedNextApiRequest, res: NextApiRes
       }
     }
 
-    const lines = await prisma.journalLine.findMany({
+    const lines = await measureApi('GET /api/accounting/reports/general-ledger', () =>
+      prisma.journalLine.findMany({
       where: {
         ...(accountId ? { accountId } : {}),
         journalEntry: {
@@ -102,12 +104,36 @@ export default withAuth(async (req: AuthenticatedNextApiRequest, res: NextApiRes
         { journalEntry: { createdAt: 'asc' } },
       ],
       include: {
-        account: true,
-        counterparty: true,
-        project: true,
-        journalEntry: true,
+        account: {
+          select: {
+            id: true,
+            code: true,
+            label: true,
+          },
+        },
+        counterparty: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+        project: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+        journalEntry: {
+          select: {
+            id: true,
+            date: true,
+            createdAt: true,
+            description: true,
+          },
+        },
       },
-    });
+    })
+    );
 
     jsonSuccess(res, {
       entityId,

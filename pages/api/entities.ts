@@ -9,6 +9,7 @@ import { getAccessibleEntityIds, getCurrentUserRecord, isSuperAdminUser } from '
 import { AuthenticatedNextApiRequest, withAuth } from '../../lib/auth';
 import { prisma } from '../../lib/prisma';
 import { createAuditLog } from '../../lib/audit-log';
+import { measureApi, measureStep } from '../../lib/performance-log';
 
 const ENTITY_TYPES = new Set<string>(Object.values(EntityType));
 const ACCOUNTING_STANDARDS = new Set<string>(Object.values(AccountingStandard));
@@ -93,25 +94,41 @@ const resolveOrganizationForEntityCreation = async ({
 export default withAuth(async (req: AuthenticatedNextApiRequest, res: NextApiResponse) => {
   if (req.method === 'GET') {
     try {
-      const currentUser = await getCurrentUserRecord(req.user.id);
+      const currentUser = await measureStep('GET /api/entities current user', () =>
+        getCurrentUserRecord(req.user.id)
+      );
 
       if (!currentUser) {
         return res.status(404).json({ success: false, message: 'User not found' });
       }
 
-      const accessibleEntityIds = await getAccessibleEntityIds(currentUser);
+      const accessibleEntityIds = await measureStep('GET /api/entities accessible ids', () =>
+        getAccessibleEntityIds(currentUser)
+      );
 
       if (!accessibleEntityIds.length && !isSuperAdminUser(currentUser)) {
         return res.status(200).json({ success: true, data: [] });
       }
 
-      const entities = await prisma.entity.findMany({
-        where: {
+      const where = {
           isActive: true,
           ...(isSuperAdminUser(currentUser) ? {} : { id: { in: accessibleEntityIds } }),
-        },
+        };
+
+      const entities = await measureStep('GET /api/entities summaries', () =>
+        prisma.entity.findMany({
+          where,
         orderBy: { createdAt: 'desc' },
-        include: {
+        select: {
+          id: true,
+          name: true,
+          legalName: true,
+          type: true,
+          country: true,
+          baseCurrency: true,
+          accountingStandard: true,
+          isActive: true,
+          createdAt: true,
           organization: {
             select: {
               name: true,
@@ -125,12 +142,25 @@ export default withAuth(async (req: AuthenticatedNextApiRequest, res: NextApiRes
               documents: true,
             },
           },
-          journalEntries: {
-            select: {
-              status: true,
-            },
-          },
         },
+      })
+      );
+
+      const journalEntryCounts = await measureStep('GET /api/entities journal counts', () =>
+        prisma.journalEntry.groupBy({
+          by: ['entityId', 'status'],
+          where: {
+            entityId: { in: entities.map((entity) => entity.id) },
+          },
+          _count: { _all: true },
+        })
+      );
+      const journalCountMap = new Map<string, { draft: number; posted: number }>();
+      journalEntryCounts.forEach((count) => {
+        const current = journalCountMap.get(count.entityId) || { draft: 0, posted: 0 };
+        if (count.status === 'DRAFT') current.draft = count._count._all;
+        if (count.status === 'POSTED') current.posted = count._count._all;
+        journalCountMap.set(count.entityId, current);
       });
 
       return res.status(200).json({
@@ -148,10 +178,8 @@ export default withAuth(async (req: AuthenticatedNextApiRequest, res: NextApiRes
           organizationName: entity.organization?.name || null,
           projectsCount: entity._count.projects,
           transactionsCount: entity._count.transactions,
-          draftJournalEntriesCount: entity.journalEntries.filter((entry) => entry.status === 'DRAFT')
-            .length,
-          postedJournalEntriesCount: entity.journalEntries.filter((entry) => entry.status === 'POSTED')
-            .length,
+          draftJournalEntriesCount: journalCountMap.get(entity.id)?.draft || 0,
+          postedJournalEntriesCount: journalCountMap.get(entity.id)?.posted || 0,
           counterpartiesCount: entity._count.counterparties,
           documentsCount: entity._count.documents,
         })),

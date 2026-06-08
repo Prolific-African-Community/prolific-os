@@ -19,6 +19,7 @@ import { getCurrentUserRecord, isSuperAdminUser } from "../../../lib/entity-acce
 import { AuthenticatedNextApiRequest, withAuth } from "../../../lib/auth";
 import { prisma } from "../../../lib/prisma";
 import { createAuditLog } from "../../../lib/audit-log";
+import { measureApi } from "../../../lib/performance-log";
 
 interface CreateAccountBody {
   entityId?: unknown;
@@ -32,6 +33,15 @@ interface CreateAccountBody {
   isActive?: unknown;
 }
 
+const parsePaginationInteger = (
+  value: string | string[] | undefined,
+  fallback: number
+) => {
+  const raw = Array.isArray(value) ? value[0] : value;
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
+};
+
 const listAccounts = async (req: AuthenticatedNextApiRequest, res: NextApiResponse) => {
   const entityId = getQueryString(req.query.entityId);
 
@@ -41,6 +51,10 @@ const listAccounts = async (req: AuthenticatedNextApiRequest, res: NextApiRespon
   }
 
   const includeInactive = getQueryString(req.query.includeInactive) === "true";
+  const onlyActive = getQueryString(req.query.onlyActive) === "true";
+  const search = getQueryString(req.query.search)?.trim();
+  const limit = Math.min(parsePaginationInteger(req.query.limit, 1000), 1000);
+  const offset = parsePaginationInteger(req.query.offset, 0);
 
   try {
     const currentUser = await getCurrentUserRecord(req.user.id);
@@ -54,13 +68,34 @@ const listAccounts = async (req: AuthenticatedNextApiRequest, res: NextApiRespon
       return;
     }
 
-    const accounts = await prisma.chartOfAccount.findMany({
+    const accounts = await measureApi("GET /api/accounting/chart-of-accounts", () =>
+      prisma.chartOfAccount.findMany({
       where: {
         entityId,
-        ...(includeInactive ? {} : { isActive: true }),
+        ...(includeInactive && !onlyActive ? {} : { isActive: true }),
+        ...(search
+          ? {
+              OR: [
+                { code: { contains: search, mode: "insensitive" } },
+                { label: { contains: search, mode: "insensitive" } },
+              ],
+            }
+          : {}),
+      },
+      select: {
+        id: true,
+        code: true,
+        label: true,
+        accountClass: true,
+        type: true,
+        isSystem: true,
+        isActive: true,
       },
       orderBy: { code: "asc" },
-    });
+      take: limit,
+      skip: offset,
+    })
+    );
 
     jsonSuccess(res, accounts);
   } catch (error) {

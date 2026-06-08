@@ -11,6 +11,7 @@ import { AuthenticatedNextApiRequest, withAuth } from '../../../../lib/auth';
 import { getCurrentUserRecord } from '../../../../lib/entity-access';
 import { canViewReports } from '../../../../lib/permissions';
 import { prisma } from '../../../../lib/prisma';
+import { measureApi } from '../../../../lib/performance-log';
 
 export default withAuth(async (req: AuthenticatedNextApiRequest, res: NextApiResponse) => {
   if (req.method !== 'GET') {
@@ -66,11 +67,18 @@ export default withAuth(async (req: AuthenticatedNextApiRequest, res: NextApiRes
     const effectiveStartDate = period?.startDate || startDate;
     const effectiveEndDate = period?.endDate || endDate;
 
-    const [accounts, postedLines] = await Promise.all([
+    const [accounts, postedLines] = await measureApi('GET /api/accounting/reports/trial-balance', () => Promise.all([
       prisma.chartOfAccount.findMany({
         where: {
           entityId,
           isActive: true,
+        },
+        select: {
+          id: true,
+          code: true,
+          label: true,
+          accountClass: true,
+          type: true,
         },
         orderBy: { code: 'asc' },
       }),
@@ -95,7 +103,7 @@ export default withAuth(async (req: AuthenticatedNextApiRequest, res: NextApiRes
           credit: true,
         },
       }),
-    ]);
+    ]));
 
     const totalsByAccount = new Map<
       string,

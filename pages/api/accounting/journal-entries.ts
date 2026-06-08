@@ -4,6 +4,7 @@ import { AuthenticatedNextApiRequest, withAuth } from '../../../lib/auth';
 import { getCurrentUserRecord } from '../../../lib/entity-access';
 import { canAccessEntity } from '../../../lib/permissions';
 import { prisma } from '../../../lib/prisma';
+import { measureStep } from '../../../lib/performance-log';
 
 export default withAuth(async (req: AuthenticatedNextApiRequest, res: NextApiResponse) => {
   if (req.method !== 'GET') {
@@ -12,6 +13,10 @@ export default withAuth(async (req: AuthenticatedNextApiRequest, res: NextApiRes
   }
 
   const entityId = getQueryString(req.query.entityId);
+  const rawLimit = Number(getQueryString(req.query.limit) || 50);
+  const rawOffset = Number(getQueryString(req.query.offset) || 0);
+  const limit = Number.isInteger(rawLimit) ? Math.min(Math.max(rawLimit, 1), 100) : 50;
+  const offset = Number.isInteger(rawOffset) && rawOffset > 0 ? rawOffset : 0;
 
   if (!entityId) {
     jsonError(res, 400, 'entityId is required');
@@ -19,26 +24,56 @@ export default withAuth(async (req: AuthenticatedNextApiRequest, res: NextApiRes
   }
 
   try {
-    const currentUser = await getCurrentUserRecord(req.user.id);
+    const currentUser = await measureStep('GET /api/accounting/journal-entries current user', () =>
+      getCurrentUserRecord(req.user.id)
+    );
     if (!currentUser || !(await canAccessEntity(currentUser, entityId))) {
       jsonError(res, 403, 'Forbidden');
       return;
     }
 
-    const journalEntries = await prisma.journalEntry.findMany({
+    const journalEntries = await measureStep('GET /api/accounting/journal-entries list', () =>
+      prisma.journalEntry.findMany({
       where: { entityId },
       orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
-      include: {
-        transaction: true,
+      take: limit,
+      skip: offset,
+      select: {
+        id: true,
+        date: true,
+        description: true,
+        status: true,
         lines: {
-          include: {
-            account: true,
-            counterparty: true,
-            project: true,
+          select: {
+            id: true,
+            debit: true,
+            credit: true,
+            currency: true,
+            description: true,
+            account: {
+              select: {
+                id: true,
+                code: true,
+                label: true,
+              },
+            },
+            counterparty: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
+            project: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
           },
         },
       },
-    });
+    })
+    );
 
     jsonSuccess(res, journalEntries);
   } catch (error) {

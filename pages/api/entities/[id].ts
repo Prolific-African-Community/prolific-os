@@ -1,9 +1,10 @@
 import { JournalEntryStatus } from '@prisma/client';
 import type { NextApiResponse } from 'next';
-import { getCurrentUserRecord, userCanAccessEntity } from '../../../lib/entity-access';
-import { getEntityPermissionSummary } from '../../../lib/permissions';
+import { getCurrentUserRecord } from '../../../lib/entity-access';
+import { getEntityPermissionSummaryForContext } from '../../../lib/permissions';
 import { AuthenticatedNextApiRequest, withAuth } from '../../../lib/auth';
 import { prisma } from '../../../lib/prisma';
+import { measureApi, measureStep } from '../../../lib/performance-log';
 
 export default withAuth(async (req: AuthenticatedNextApiRequest, res: NextApiResponse) => {
   if (req.method !== 'GET') {
@@ -17,52 +18,108 @@ export default withAuth(async (req: AuthenticatedNextApiRequest, res: NextApiRes
   }
 
   try {
-    const currentUser = await getCurrentUserRecord(req.user.id);
+    const [currentUser, entity] = await measureApi(
+      'GET /api/entities/[id] auth + detail',
+      () =>
+        Promise.all([
+          measureStep('GET /api/entities/[id] current user', () =>
+            getCurrentUserRecord(req.user.id)
+          ),
+          measureStep('GET /api/entities/[id] detail', () =>
+            prisma.entity.findUnique({
+              where: { id: entityId },
+              select: {
+                id: true,
+                organizationId: true,
+                name: true,
+                legalName: true,
+                type: true,
+                country: true,
+                baseCurrency: true,
+                accountingStandard: true,
+                accountingInitializedAt: true,
+                isActive: true,
+                createdAt: true,
+                organization: {
+                  select: {
+                    id: true,
+                    name: true,
+                    legalName: true,
+                    type: true,
+                    country: true,
+                    baseCurrency: true,
+                    isActive: true,
+                    status: true,
+                  },
+                },
+                accountingTemplate: {
+                  select: {
+                    id: true,
+                    name: true,
+                    version: true,
+                  },
+                },
+                funds: {
+                  select: {
+                    id: true,
+                    name: true,
+                    currency: true,
+                  },
+                  orderBy: { createdAt: 'asc' },
+                  take: 1,
+                },
+              },
+            })
+          ),
+        ])
+    );
 
     if (!currentUser) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
 
-    const permissions = await getEntityPermissionSummary(currentUser, entityId);
+    if (!entity) {
+      return res.status(404).json({ success: false, message: 'Entity not found' });
+    }
+
+    const permissions = getEntityPermissionSummaryForContext(currentUser, {
+      entityId,
+      organizationId: entity.organizationId,
+      organizationIsActive: entity.organization.isActive,
+      organizationStatus: entity.organization.status,
+    });
 
     if (!permissions.canAccessWorkspace) {
       return res.status(403).json({ success: false, message: 'Forbidden' });
     }
 
-    const entity = await prisma.entity.findUnique({
-      where: { id: entityId },
-      include: {
-        organization: true,
-        accountingTemplate: {
-          select: {
-            id: true,
-            name: true,
-            version: true,
-          },
-        },
-        projects: {
-          orderBy: { createdAt: 'desc' },
-        },
-        funds: {
-          orderBy: { createdAt: 'asc' },
-          take: 1,
-        },
-      },
-    });
-
-    if (!entity) {
-      return res.status(404).json({ success: false, message: 'Entity not found' });
-    }
-
-    const [counterpartiesCount, transactionsCount, documentsCount, journalEntries] = await Promise.all([
+    const [
+      projectsCount,
+      counterpartiesCount,
+      transactionsCount,
+      documentsCount,
+      journalEntryCounts,
+    ] = await measureApi('GET /api/entities/[id] counts', () => Promise.all([
+      prisma.project.count({ where: { entityId } }),
       prisma.counterparty.count({ where: { entityId } }),
       prisma.businessTransaction.count({ where: { entityId } }),
       prisma.document.count({ where: { entityId } }),
-      prisma.journalEntry.findMany({
+      prisma.journalEntry.groupBy({
+        by: ['status'],
         where: { entityId },
-        select: { status: true },
+        _count: { _all: true },
       }),
-    ]);
+    ]));
+    const journalCounts = journalEntryCounts.reduce(
+      (totals, count) => {
+        totals.total += count._count._all;
+        if (count.status === JournalEntryStatus.DRAFT) totals.draft = count._count._all;
+        if (count.status === JournalEntryStatus.POSTED) totals.posted = count._count._all;
+        if (count.status === JournalEntryStatus.REVERSED) totals.reversed = count._count._all;
+        return totals;
+      },
+      { total: 0, draft: 0, posted: 0, reversed: 0 }
+    );
 
     return res.status(200).json({
       success: true,
@@ -72,17 +129,11 @@ export default withAuth(async (req: AuthenticatedNextApiRequest, res: NextApiRes
           linkedLegacyFund: entity.funds[0] || null,
         },
         summary: {
+          projectsCount,
           counterpartiesCount,
           transactionsCount,
           documentsCount,
-          journalEntries: {
-            total: journalEntries.length,
-            draft: journalEntries.filter((entry) => entry.status === JournalEntryStatus.DRAFT).length,
-            posted: journalEntries.filter((entry) => entry.status === JournalEntryStatus.POSTED)
-              .length,
-            reversed: journalEntries.filter((entry) => entry.status === JournalEntryStatus.REVERSED)
-              .length,
-          },
+          journalEntries: journalCounts,
         },
         permissions,
       },

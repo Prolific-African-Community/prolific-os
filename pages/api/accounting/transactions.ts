@@ -12,9 +12,10 @@ import {
 } from '../../../lib/accounting-api';
 import { AuthenticatedNextApiRequest, withAuth } from '../../../lib/auth';
 import { getCurrentUserRecord } from '../../../lib/entity-access';
-import { canAccessEntity, canCreateAccountingTransaction } from '../../../lib/permissions';
+import { canAccessEntity, getEntityPermissionSummaryForContext } from '../../../lib/permissions';
 import { prisma } from '../../../lib/prisma';
 import { createAuditLog } from '../../../lib/audit-log';
+import { measureApi, measureStep } from '../../../lib/performance-log';
 
 interface CreateTransactionBody {
   entityId?: unknown;
@@ -30,24 +31,45 @@ interface CreateTransactionBody {
 
 const listTransactions = async (req: AuthenticatedNextApiRequest, res: NextApiResponse) => {
   const entityId = getQueryString(req.query.entityId);
+  const rawLimit = Number(getQueryString(req.query.limit) || 50);
+  const rawOffset = Number(getQueryString(req.query.offset) || 0);
+  const limit = Number.isInteger(rawLimit) ? Math.min(Math.max(rawLimit, 1), 100) : 50;
+  const offset = Number.isInteger(rawOffset) && rawOffset > 0 ? rawOffset : 0;
 
   if (!entityId) {
     return jsonError(res, 400, 'entityId is required');
   }
-  const currentUser = await getCurrentUserRecord(req.user.id);
+  const currentUser = await measureStep('GET /api/accounting/transactions current user', () =>
+    getCurrentUserRecord(req.user.id)
+  );
   if (!currentUser || !(await canAccessEntity(currentUser, entityId))) {
     return jsonError(res, 403, 'Forbidden');
   }
 
-  const transactions = await prisma.businessTransaction.findMany({
+  const transactions = await measureStep('GET /api/accounting/transactions list', () =>
+    prisma.businessTransaction.findMany({
     where: { entityId },
     orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
-    include: {
-      counterparty: true,
-      project: true,
-      journalEntries: true,
+    take: limit,
+    skip: offset,
+    select: {
+      id: true,
+      date: true,
+      type: true,
+      amount: true,
+      currency: true,
+      status: true,
+      description: true,
+      counterparty: {
+        select: {
+          id: true,
+          name: true,
+          type: true,
+        },
+      },
     },
-  });
+  })
+  );
 
   return jsonSuccess(res, transactions);
 };
@@ -66,8 +88,10 @@ const createTransaction = async (req: AuthenticatedNextApiRequest, res: NextApiR
   if (!entityId) {
     return jsonError(res, 400, 'entityId is required');
   }
-  const currentUser = await getCurrentUserRecord(req.user.id);
-  if (!currentUser || !(await canCreateAccountingTransaction(currentUser, entityId))) {
+  const currentUser = await measureStep('POST /api/accounting/transactions current user', () =>
+    getCurrentUserRecord(req.user.id)
+  );
+  if (!currentUser) {
     return jsonError(res, 403, 'Forbidden');
   }
 
@@ -83,48 +107,93 @@ const createTransaction = async (req: AuthenticatedNextApiRequest, res: NextApiR
     return jsonError(res, 400, 'date must be a valid ISO date string');
   }
 
-  const entity = await prisma.entity.findUnique({ where: { id: entityId } });
+  const entity = await measureStep('POST /api/accounting/transactions entity lookup', () =>
+    prisma.entity.findUnique({
+      where: { id: entityId },
+      select: {
+        id: true,
+        organizationId: true,
+        baseCurrency: true,
+        organization: {
+          select: {
+            isActive: true,
+            status: true,
+          },
+        },
+      },
+    })
+  );
 
   if (!entity) {
     return jsonError(res, 404, 'Entity not found');
   }
 
+  const permissions = getEntityPermissionSummaryForContext(currentUser, {
+    entityId,
+    organizationId: entity.organizationId,
+    organizationIsActive: entity.organization.isActive,
+    organizationStatus: entity.organization.status,
+  });
+
+  if (!permissions.canCreateAccountingTransaction) {
+    return jsonError(res, 403, 'Forbidden');
+  }
+
   const currency = getOptionalString(body.currency) || entity.baseCurrency || 'EUR';
 
-  if (fundId) {
-    const fund = await prisma.fund.findUnique({ where: { id: fundId } });
+  const [fund, project, counterparty] = await measureApi(
+    'POST /api/accounting/transactions related lookups',
+    () =>
+      Promise.all([
+        fundId
+          ? measureStep('POST /api/accounting/transactions fund lookup', () =>
+              prisma.fund.findUnique({
+                where: { id: fundId },
+                select: { id: true, entityId: true },
+              })
+            )
+          : Promise.resolve(null),
+        projectId
+          ? measureStep('POST /api/accounting/transactions project lookup', () =>
+              prisma.project.findUnique({
+                where: { id: projectId },
+                select: { id: true, entityId: true, name: true },
+              })
+            )
+          : Promise.resolve(null),
+        counterpartyId
+          ? measureStep('POST /api/accounting/transactions counterparty lookup', () =>
+              prisma.counterparty.findUnique({
+                where: { id: counterpartyId },
+                select: { id: true, entityId: true, name: true, type: true },
+              })
+            )
+          : Promise.resolve(null),
+      ])
+  );
 
-    if (!fund) {
-      return jsonError(res, 404, 'Fund not found');
-    }
-
-    if (fund.entityId && fund.entityId !== entityId) {
-      return jsonError(res, 400, 'Fund does not belong to the selected entity');
-    }
+  if (fundId && !fund) {
+    return jsonError(res, 404, 'Fund not found');
   }
 
-  if (projectId) {
-    const project = await prisma.project.findUnique({ where: { id: projectId } });
-
-    if (!project) {
-      return jsonError(res, 404, 'Project not found');
-    }
-
-    if (project.entityId && project.entityId !== entityId) {
-      return jsonError(res, 400, 'Project does not belong to the selected entity');
-    }
+  if (fund?.entityId && fund.entityId !== entityId) {
+    return jsonError(res, 400, 'Fund does not belong to the selected entity');
   }
 
-  if (counterpartyId) {
-    const counterparty = await prisma.counterparty.findUnique({ where: { id: counterpartyId } });
+  if (projectId && !project) {
+    return jsonError(res, 404, 'Project not found');
+  }
 
-    if (!counterparty) {
-      return jsonError(res, 404, 'Counterparty not found');
-    }
+  if (project?.entityId && project.entityId !== entityId) {
+    return jsonError(res, 400, 'Project does not belong to the selected entity');
+  }
 
-    if (counterparty.entityId !== entityId) {
-      return jsonError(res, 400, 'Counterparty does not belong to the selected entity');
-    }
+  if (counterpartyId && !counterparty) {
+    return jsonError(res, 404, 'Counterparty not found');
+  }
+
+  if (counterparty?.entityId !== undefined && counterparty?.entityId !== entityId) {
+    return jsonError(res, 400, 'Counterparty does not belong to the selected entity');
   }
 
   const rule =
@@ -155,8 +224,10 @@ const createTransaction = async (req: AuthenticatedNextApiRequest, res: NextApiR
     transactionType
   );
 
-  const data = await prisma.$transaction(async (tx) => {
-    const transaction = await tx.businessTransaction.create({
+  const data = await measureApi('POST /api/accounting/transactions write', () =>
+    prisma.$transaction(async (tx) => {
+    const transaction = await measureStep('POST /api/accounting/transactions create transaction', () =>
+      tx.businessTransaction.create({
       data: {
         entityId,
         fundId,
@@ -170,9 +241,11 @@ const createTransaction = async (req: AuthenticatedNextApiRequest, res: NextApiR
         status: TransactionStatus.DRAFT,
         createdById: req.user.id,
       },
-    });
+      })
+    );
 
-    const journalEntry = await tx.journalEntry.create({
+    const journalEntry = await measureStep('POST /api/accounting/transactions create journal', () =>
+      tx.journalEntry.create({
       data: {
         entityId,
         transactionId: transaction.id,
@@ -184,27 +257,62 @@ const createTransaction = async (req: AuthenticatedNextApiRequest, res: NextApiR
           create: [
             {
               accountId: rule.debitAccountId,
-              projectId,
-              counterpartyId,
-              debit: amount,
-              credit: 0,
-              currency,
+            projectId,
+            counterpartyId,
+            debit: amount,
+            credit: 0,
+            currency,
+          },
+          {
+            accountId: rule.creditAccountId,
+            projectId,
+            counterpartyId,
+            debit: 0,
+            credit: amount,
+            currency,
+          },
+        ],
+      },
+      },
+      select: {
+        id: true,
+        date: true,
+        description: true,
+        status: true,
+        lines: {
+          select: {
+            id: true,
+            debit: true,
+            credit: true,
+            currency: true,
+            description: true,
+            account: {
+              select: {
+                id: true,
+                code: true,
+                label: true,
+              },
             },
-            {
-              accountId: rule.creditAccountId,
-              projectId,
-              counterpartyId,
-              debit: 0,
-              credit: amount,
-              currency,
+            project: {
+              select: {
+                id: true,
+                name: true,
+              },
             },
-          ],
+            counterparty: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
+          },
         },
       },
-      include: { lines: true },
-    });
+    })
+    );
 
-    await createAuditLog(tx, {
+    await measureStep('POST /api/accounting/transactions audit log', () =>
+      createAuditLog(tx, {
       userId: req.user.id,
       organizationId: entity.organizationId,
       entityId,
@@ -217,10 +325,30 @@ const createTransaction = async (req: AuthenticatedNextApiRequest, res: NextApiR
         currency: transaction.currency,
         journalEntryId: journalEntry.id,
       },
-    });
+      })
+    );
 
-    return { transaction, journalEntry };
-  });
+    return {
+      transaction: {
+        id: transaction.id,
+        date: transaction.date,
+        type: transaction.type,
+        amount: transaction.amount,
+        currency: transaction.currency,
+        status: transaction.status,
+        description: transaction.description,
+        counterparty: counterparty
+          ? {
+              id: counterparty.id,
+              name: counterparty.name,
+              type: counterparty.type,
+            }
+          : null,
+      },
+      journalEntry,
+    };
+    })
+  );
 
   return jsonSuccess(res, data, 201);
 };

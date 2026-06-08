@@ -40,6 +40,13 @@ export interface EntityPermissionSummary {
   canViewReports: boolean;
 }
 
+export interface EntityPermissionContextInput {
+  entityId: string;
+  organizationId: string;
+  organizationIsActive: boolean;
+  organizationStatus: OrganizationStatus;
+}
+
 export const getCurrentUserAccessContext = async (
   req: AuthenticatedNextApiRequest
 ) => getCurrentUserRecord(req.user.id);
@@ -119,6 +126,68 @@ const evaluateEntityPermissions = async (
     canManageCounterparties: operationalWrite,
     canManageDocuments: operationalWrite,
     canViewReports: Boolean(access.entity) && (internalAccess || investor),
+  };
+};
+
+export const getEntityPermissionSummaryForContext = (
+  user: CurrentUserRecord,
+  context: EntityPermissionContextInput
+): EntityPermissionSummary => {
+  const superAdmin = isSuperAdminUser(user);
+
+  if (
+    !superAdmin &&
+    (!context.organizationIsActive ||
+      context.organizationStatus !== OrganizationStatus.ACTIVE)
+  ) {
+    return {
+      canAccessWorkspace: false,
+      canManageEntity: false,
+      canManageAccountingSetup: false,
+      canCreateAccountingTransaction: false,
+      canPostJournalEntry: false,
+      canReverseJournalEntry: false,
+      canManageCounterparties: false,
+      canManageDocuments: false,
+      canViewReports: false,
+    };
+  }
+
+  const organizationRole =
+    user.organizationUsers.find(
+      (membership) =>
+        membership.isActive &&
+        membership.organizationId === context.organizationId &&
+        membership.organization.isActive &&
+        membership.organization.status === OrganizationStatus.ACTIVE
+    )?.role || null;
+  const entityRole =
+    user.entityUsers.find(
+      (membership) =>
+        membership.isActive && membership.entityId === context.entityId
+    )?.role || null;
+  const internalOrganizationUser =
+    organizationRole !== null && INTERNAL_ORGANIZATION_ROLES.includes(organizationRole);
+  const organizationOperator =
+    organizationRole !== null && ORGANIZATION_OPERATOR_ROLES.includes(organizationRole);
+  const internalEntityUser =
+    entityRole !== null && INTERNAL_ENTITY_ROLES.includes(entityRole);
+  const entityOperator =
+    entityRole !== null && ENTITY_MANAGER_ROLES.includes(entityRole);
+  const investor = entityRole === EntityRole.INVESTOR;
+  const internalAccess = superAdmin || internalOrganizationUser || internalEntityUser;
+  const operationalWrite = superAdmin || organizationOperator || entityOperator;
+
+  return {
+    canAccessWorkspace: internalAccess,
+    canManageEntity: operationalWrite,
+    canManageAccountingSetup: operationalWrite,
+    canCreateAccountingTransaction: operationalWrite,
+    canPostJournalEntry: operationalWrite,
+    canReverseJournalEntry: operationalWrite,
+    canManageCounterparties: operationalWrite,
+    canManageDocuments: operationalWrite,
+    canViewReports: internalAccess || investor,
   };
 };
 

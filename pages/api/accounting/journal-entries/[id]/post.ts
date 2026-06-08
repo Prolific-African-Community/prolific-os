@@ -16,6 +16,7 @@ import {
   assertOpenAccountingPeriod,
 } from '../../../../../lib/accounting-periods';
 import { createAuditLog } from '../../../../../lib/audit-log';
+import { measureApi, measureStep } from '../../../../../lib/performance-log';
 
 export default withAuth(async (req: AuthenticatedNextApiRequest, res: NextApiResponse) => {
   if (req.method !== 'POST') {
@@ -31,80 +32,120 @@ export default withAuth(async (req: AuthenticatedNextApiRequest, res: NextApiRes
   }
 
   try {
-    const postedJournalEntry = await prisma.$transaction(async (tx) => {
-      const journalEntry = await tx.journalEntry.findUnique({
+    const currentUser = await measureStep(
+      'POST /api/accounting/journal-entries/[id]/post current user',
+      () => getCurrentUserRecord(req.user.id)
+    );
+
+    const journalEntry = await measureStep(
+      'POST /api/accounting/journal-entries/[id]/post entry lookup',
+      () =>
+        prisma.journalEntry.findUnique({
         where: { id: journalEntryId },
-        include: { lines: true },
-      });
-
-      if (!journalEntry) {
-        throw new AccountingValidationError('Journal entry not found');
-      }
-      const currentUser = await getCurrentUserRecord(req.user.id);
-      if (!currentUser || !(await canPostJournalEntry(currentUser, journalEntry.entityId))) {
-        throw new AccountingValidationError('Forbidden');
-      }
-
-      if (journalEntry.status !== JournalEntryStatus.DRAFT) {
-        throw new AccountingValidationError('Only DRAFT journal entries can be posted');
-      }
-      await assertOpenAccountingPeriod(journalEntry.entityId, journalEntry.date, {
-        client: tx,
-      });
-
-      const validationError = validateBalancedJournalEntry(journalEntry.lines);
-
-      if (validationError) {
-        throw new AccountingValidationError(validationError);
-      }
-
-      const postedAt = new Date();
-      const updateResult = await tx.journalEntry.updateMany({
-        where: {
-          id: journalEntry.id,
-          status: JournalEntryStatus.DRAFT,
-        },
-        data: {
-          status: JournalEntryStatus.POSTED,
-          postedAt,
-          postedById: req.user.id,
-        },
-      });
-
-      if (updateResult.count !== 1) {
-        throw new AccountingValidationError('Journal entry has already been posted');
-      }
-
-      if (journalEntry.transactionId) {
-        await tx.businessTransaction.update({
-          where: { id: journalEntry.transactionId },
-          data: { status: TransactionStatus.POSTED },
-        });
-      }
-
-      await createAuditLog(tx, {
-        userId: req.user.id,
-        entityId: journalEntry.entityId,
-        action: 'JOURNAL_ENTRY_POSTED',
-        resourceType: 'JournalEntry',
-        resourceId: journalEntry.id,
-        metadata: {
-          before: { status: JournalEntryStatus.DRAFT },
-          after: { status: JournalEntryStatus.POSTED },
-          transactionId: journalEntry.transactionId,
-        },
-      });
-
-      return tx.journalEntry.findUniqueOrThrow({
-        where: { id: journalEntry.id },
-        include: {
-          transaction: true,
+        select: {
+          id: true,
+          entityId: true,
+          transactionId: true,
+          date: true,
+          status: true,
           lines: {
-            include: { account: true },
+            select: {
+              id: true,
+              debit: true,
+              credit: true,
+              currency: true,
+            },
           },
         },
-      });
-    });
+      })
+    );
+
+    if (!journalEntry) {
+      throw new AccountingValidationError('Journal entry not found');
+    }
+
+    if (!currentUser || !(await canPostJournalEntry(currentUser, journalEntry.entityId))) {
+      throw new AccountingValidationError('Forbidden');
+    }
+
+    if (journalEntry.status !== JournalEntryStatus.DRAFT) {
+      throw new AccountingValidationError('Only DRAFT journal entries can be posted');
+    }
+
+    await measureStep(
+      'POST /api/accounting/journal-entries/[id]/post period check',
+      () => assertOpenAccountingPeriod(journalEntry.entityId, journalEntry.date)
+    );
+
+    const validationError = validateBalancedJournalEntry(journalEntry.lines);
+
+    if (validationError) {
+      throw new AccountingValidationError(validationError);
+    }
+
+    const postedJournalEntry = await measureApi('POST /api/accounting/journal-entries/[id]/post write', () =>
+      prisma.$transaction(async (tx) => {
+        const postedAt = new Date();
+        const updateResult = await measureStep(
+          'POST /api/accounting/journal-entries/[id]/post update entry',
+          () =>
+            tx.journalEntry.updateMany({
+              where: {
+                id: journalEntry.id,
+                status: JournalEntryStatus.DRAFT,
+              },
+              data: {
+                status: JournalEntryStatus.POSTED,
+                postedAt,
+                postedById: req.user.id,
+              },
+            })
+        );
+
+        if (updateResult.count !== 1) {
+          throw new AccountingValidationError('Journal entry has already been posted');
+        }
+
+        const transactionId = journalEntry.transactionId;
+
+        if (transactionId) {
+          await measureStep(
+            'POST /api/accounting/journal-entries/[id]/post update transaction',
+            () =>
+              tx.businessTransaction.update({
+                where: { id: transactionId },
+                data: { status: TransactionStatus.POSTED },
+              })
+          );
+        }
+
+        await measureStep(
+          'POST /api/accounting/journal-entries/[id]/post audit log',
+          () =>
+            createAuditLog(tx, {
+              userId: req.user.id,
+              entityId: journalEntry.entityId,
+              action: 'JOURNAL_ENTRY_POSTED',
+              resourceType: 'JournalEntry',
+              resourceId: journalEntry.id,
+              metadata: {
+                before: { status: JournalEntryStatus.DRAFT },
+                after: { status: JournalEntryStatus.POSTED },
+                transactionId,
+              },
+            })
+        );
+
+        return {
+          id: journalEntry.id,
+          entityId: journalEntry.entityId,
+          status: JournalEntryStatus.POSTED,
+          postedAt,
+          transactionId,
+          lineCount: journalEntry.lines.length,
+        };
+      })
+    );
 
     jsonSuccess(res, postedJournalEntry);
   } catch (error) {

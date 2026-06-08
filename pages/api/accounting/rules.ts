@@ -13,6 +13,7 @@ import { getCurrentUserRecord } from "../../../lib/entity-access";
 import { AuthenticatedNextApiRequest, withAuth } from "../../../lib/auth";
 import { prisma } from "../../../lib/prisma";
 import { createAuditLog } from "../../../lib/audit-log";
+import { measureApi } from "../../../lib/performance-log";
 
 interface CreateRuleBody {
   entityId?: unknown;
@@ -46,17 +47,39 @@ const listRules = async (req: AuthenticatedNextApiRequest, res: NextApiResponse)
       return;
     }
 
-    const rules = await prisma.accountingRule.findMany({
+    const rules = await measureApi("GET /api/accounting/rules", () =>
+      prisma.accountingRule.findMany({
       where: {
         ...(includeInactive ? {} : { isActive: true }),
         OR: [{ entityId }, { entityId: null }],
       },
       orderBy: [{ priority: "asc" }, { transactionType: "asc" }],
       include: {
-        debitAccount: true,
-        creditAccount: true,
+        debitAccount: {
+          select: {
+            id: true,
+            code: true,
+            label: true,
+            accountClass: true,
+            type: true,
+            isSystem: true,
+            isActive: true,
+          },
+        },
+        creditAccount: {
+          select: {
+            id: true,
+            code: true,
+            label: true,
+            accountClass: true,
+            type: true,
+            isSystem: true,
+            isActive: true,
+          },
+        },
       },
-    });
+    })
+    );
 
     jsonSuccess(res, rules);
   } catch (error) {
