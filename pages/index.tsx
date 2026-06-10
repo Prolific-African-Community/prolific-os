@@ -1,6 +1,7 @@
 "use client";
 
-import { HTMLAttributes, ReactNode, useEffect, useRef, useState } from "react";
+import Head from "next/head";
+import { FormEvent, HTMLAttributes, ReactNode, useEffect, useRef, useState } from "react";
 
 /* ------------------ Utils ------------------ */
 type ClassValue = string | false | null | undefined;
@@ -29,33 +30,43 @@ const PARAGRAPH = "text-sm font-semibold leading-7 text-black/60 md:text-base";
 
 /* ------------------ Data ------------------ */
 
-const PILLARS = [
-  "Financial Administration",
-  "Investor Portal",
-  "Automation",
-  "Auditability",
-];
+const SERVICE_PROOF_POINTS = [
+  "Company formation",
+  "Accounting & tax compliance",
+  "Banking assistance",
+  "Investor reporting",
+] as const;
 
 const SERVICES = [
   {
-    title: "Financial Administration",
+    title: "Company Formation",
     description:
-      "Bookkeeping, NAV preparation, period close, capital accounts and financial reporting for investment structures.",
+      "Support for Luxembourg companies, holdings, SPVs and investment vehicles.",
   },
   {
-    title: "Investor Portal",
+    title: "Banking Assistance",
     description:
-      "Secure access to documents, positions, investor statements and reporting history from one clean interface.",
+      "Preparation and coordination of bank account opening files with Luxembourg and international banking partners.",
   },
   {
-    title: "Investment Tracking",
+    title: "Accounting & Tax",
     description:
-      "Track SPVs, holdings, capital movements, distributions and operational activity with structured visibility.",
+      "Bookkeeping, VAT, annual accounts, tax compliance and audit-ready financial records.",
   },
   {
-    title: "Automation & Controls",
+    title: "Holding & SPV Administration",
     description:
-      "AI-assisted extraction, reconciliations, workflows and audit trails — always controlled and reviewable.",
+      "Administration of participations, capital movements, shareholder records, distributions and investment flows.",
+  },
+  {
+    title: "Investor Reporting",
+    description:
+      "Clear reporting for investors, shareholders and stakeholders, including statements, documents and performance views.",
+  },
+  {
+    title: "Family Office Support",
+    description:
+      "Structured financial oversight for families managing companies, assets and private investments.",
   },
 ];
 
@@ -69,45 +80,240 @@ type FeatureCard = {
 
 const FEATURE_CARDS: FeatureCard[] = [
   {
-    title: "SPV & Holding Company Reporting",
+    title: "Entity Dashboard",
     description:
-      "Clean reporting for single-asset vehicles, holding structures and family investment entities.",
+      "View companies, holdings, SPVs and key financial indicators from one controlled interface.",
     visual: "structure",
   },
   {
-    title: "Private Equity Operations",
+    title: "Secure Document Room",
     description:
-      "Capital calls, distributions, NAV support, investor records and structured deal-level follow-up.",
+      "Centralize statements, agreements, reports, notices and compliance documents.",
+    visual: "documents",
+  },
+  {
+    title: "Investor Access",
+    description:
+      "Give investors and shareholders structured access to relevant reports and documents.",
     visual: "flow",
   },
   {
-    title: "Document & Data Room",
+    title: "Accounting Visibility",
     description:
-      "Centralized access to statements, reports, agreements, notices and audit-ready documentation.",
+      "Track accounting status, reporting deadlines, open items and period-close progress.",
+    visual: "structure",
+  },
+  {
+    title: "Audit Trail",
+    description:
+      "Maintain traceable records of uploads, approvals, financial movements and key actions.",
     visual: "documents",
+  },
+  {
+    title: "Workflow Controls",
+    description:
+      "Structure approvals, document requests and recurring administrative tasks.",
+    visual: "flow",
   },
 ];
 
 const DISTINCTIVE_FEATURES = [
   {
-    title: "Controlled accounting engine",
-    description: "Precision-built general ledger with rule-based workflows.",
+    title: "Secure client portal",
+    description: "Centralized access to entities, reports, documents and key financial information.",
+    icon: "lock",
+  },
+  {
+    title: "Accounting visibility",
+    description: "Track reporting status, deadlines, open items and period-close progress.",
     icon: "ledger",
   },
   {
-    title: "Immutable audit trail",
-    description: "Complete traceability with time-stamped records.",
-    icon: "shield",
-  },
-  {
-    title: "Reporting clarity",
-    description: "Consistent, investor-ready reports from structured data.",
+    title: "Structured reporting",
+    description: "Investor-ready reports built from organized financial and operational data.",
     icon: "report",
   },
   {
-    title: "Secure investor access",
-    description: "Role-based permissions for sensitive financial information.",
-    icon: "lock",
+    title: "Controlled workflows",
+    description: "Traceable approvals, document requests and administrative actions.",
+    icon: "shield",
+  },
+] as const;
+
+const LUXEMBOURG_REASONS = [
+  {
+    title: "Credibility",
+    description:
+      "An internationally recognized jurisdiction for serious businesses, investors and private wealth structures.",
+  },
+  {
+    title: "Stability",
+    description:
+      "A trusted legal and regulatory environment with strong institutional reputation.",
+  },
+  {
+    title: "European access",
+    description:
+      "A strategic base to operate, invest and structure activities across Europe.",
+  },
+  {
+    title: "Banking ecosystem",
+    description:
+      "A mature financial center that supports professional banking, administration and reporting needs.",
+  },
+] as const;
+
+const COMPARISON_ITEMS = [
+  {
+    title: "Traditional administration",
+    items: [
+      "Scattered emails",
+      "Excel-based reporting",
+      "Limited visibility between reporting periods",
+      "Manual follow-up",
+      "Fragmented investor communication",
+    ],
+  },
+  {
+    title: "Proliquid",
+    items: [
+      "Secure client portal",
+      "Structured financial data",
+      "Real-time operational visibility",
+      "Workflow-based administration",
+      "Centralized investor reporting",
+    ],
+  },
+] as const;
+
+const CONSULTATION_NEEDS = [
+  "Company formation",
+  "Banking assistance",
+  "Accounting & tax",
+  "Holding / SPV administration",
+  "Investor reporting",
+  "Family office support",
+  "Other",
+] as const;
+
+const CLIENT_PROFILES = [
+  {
+    label: "Entrepreneurs",
+    title: "Entrepreneurs establishing Luxembourg structures",
+    subtitle: "For founders and operators who need a credible Luxembourg base.",
+    needs: [
+      "Company formation and administrative setup",
+      "Bank account preparation and KYC coordination",
+      "Accounting, VAT and annual compliance",
+    ],
+    value:
+      "Proliquid helps entrepreneurs move from fragmented setup tasks to a structured Luxembourg operating base with clear financial visibility.",
+  },
+  {
+    label: "International Investors",
+    title: "International investors",
+    subtitle:
+      "For investors using Luxembourg to structure cross-border holdings and private investments.",
+    needs: [
+      "Investment vehicle administration",
+      "Banking and compliance documentation",
+      "Reporting on positions, flows and distributions",
+    ],
+    value:
+      "Proliquid provides a controlled administration layer to monitor investments, documents and reporting from one secure workspace.",
+  },
+  {
+    label: "Holding Companies",
+    title: "Holding companies",
+    subtitle:
+      "For structures holding participations, subsidiaries, loans or investment assets.",
+    needs: [
+      "Bookkeeping and annual accounts",
+      "Tracking of participations and intercompany flows",
+      "Shareholder and management reporting",
+    ],
+    value:
+      "Proliquid gives holding companies cleaner records, better reporting cadence and centralized access to financial documentation.",
+  },
+  {
+    label: "SPVs",
+    title: "SPVs and private investment vehicles",
+    subtitle:
+      "For single-asset or deal-specific structures that need disciplined administration.",
+    needs: [
+      "Capital movements and investor records",
+      "Deal-level document management",
+      "Distributions, reporting and audit trail",
+    ],
+    value:
+      "Proliquid helps SPVs stay organized, investor-ready and easier to monitor across the full lifecycle of the vehicle.",
+  },
+  {
+    label: "Family Offices",
+    title: "Family offices",
+    subtitle:
+      "For families managing companies, real assets, private investments and financial documentation.",
+    needs: [
+      "Consolidated view of entities and assets",
+      "Document room for legal and financial records",
+      "Structured reporting for family stakeholders",
+    ],
+    value:
+      "Proliquid brings order, visibility and governance to family wealth structures without relying only on spreadsheets and email.",
+  },
+  {
+    label: "Real Estate Structures",
+    title: "Real estate investment structures",
+    subtitle:
+      "For vehicles holding property assets, development projects or income-generating real estate.",
+    needs: [
+      "Property vehicle accounting",
+      "Tracking of capital calls, loans and distributions",
+      "Investor and asset-level reporting",
+    ],
+    value:
+      "Proliquid supports real estate structures with organized accounting, documentation and reporting across assets and investors.",
+  },
+  {
+    label: "Cross-Border Groups",
+    title: "Cross-border groups",
+    subtitle:
+      "For groups operating across jurisdictions that need Luxembourg-level structure and reporting discipline.",
+    needs: [
+      "Multi-entity financial administration",
+      "Intercompany flow tracking",
+      "Centralized reporting and documentation",
+    ],
+    value:
+      "Proliquid helps cross-border groups centralize financial oversight and maintain cleaner records across entities.",
+  },
+] as const;
+
+const CLIENT_JOURNEY = [
+  {
+    title: "Understand the structure",
+    description:
+      "We review your activity, objectives, ownership and reporting needs.",
+  },
+  {
+    title: "Set up the Luxembourg vehicle",
+    description:
+      "We coordinate company formation, documentation and onboarding.",
+  },
+  {
+    title: "Prepare banking and compliance",
+    description:
+      "We support the bank account file, KYC documentation and administrative requirements.",
+  },
+  {
+    title: "Run accounting and reporting",
+    description:
+      "We manage bookkeeping, tax obligations, financial records and investor reporting.",
+  },
+  {
+    title: "Monitor through Proliquid",
+    description:
+      "You follow entities, documents and financial activity through the Proliquid platform.",
   },
 ] as const;
 
@@ -190,10 +396,11 @@ function PixelCardVisual() {
 
   return (
     <div className="relative mx-auto h-[430px] w-full max-w-[520px]">
-      <div className="absolute right-0 top-16 h-28 w-28 rounded-[1.5rem] bg-blue-500" />
-      <div className="absolute right-14 top-48 h-24 w-24 rounded-[1.5rem] bg-sky-400" />
+      <div className="pointer-events-none absolute left-12 top-12 h-32 w-32 rounded-full bg-white/50 blur-3xl motion-safe:animate-float-slow" />
+      <div className="pointer-events-none absolute right-0 top-16 h-28 w-28 rounded-[1.5rem] bg-blue-500 motion-safe:animate-float-medium" />
+      <div className="pointer-events-none absolute right-14 top-48 h-24 w-24 rounded-[1.5rem] bg-sky-400 motion-safe:animate-float-slow" />
 
-      <div className="absolute left-10 top-8 h-[350px] w-[245px] rotate-[24deg] rounded-[2rem] bg-black p-6 shadow-[0_30px_80px_rgba(0,0,0,0.3)]">
+      <div className="absolute left-10 top-8 h-[350px] w-[245px] rotate-[24deg] rounded-[2rem] bg-black p-6 shadow-[0_30px_80px_rgba(0,0,0,0.3)] motion-safe:animate-float-slow">
         <div className="flex justify-between text-[10px] text-white/70">
           <div>
             <p className="text-blue-300">Proliquid</p>
@@ -228,10 +435,10 @@ function PixelCardVisual() {
         </div>
       </div>
 
-      <span className="absolute left-4 top-20 h-3 w-3 rounded-sm bg-blue-500" />
-      <span className="absolute right-20 top-4 h-3 w-3 rounded-sm bg-sky-400" />
-      <span className="absolute bottom-16 left-20 h-4 w-4 rounded-sm bg-blue-600" />
-      <span className="absolute bottom-8 right-28 h-2 w-2 rounded-sm bg-black" />
+      <span className="absolute left-4 top-20 h-3 w-3 rounded-sm bg-blue-500 motion-safe:animate-pulse-soft" />
+      <span className="absolute right-20 top-4 h-3 w-3 rounded-sm bg-sky-400 motion-safe:animate-float-medium" />
+      <span className="absolute bottom-16 left-20 h-4 w-4 rounded-sm bg-blue-600 motion-safe:animate-float-slow" />
+      <span className="absolute bottom-8 right-28 h-2 w-2 rounded-sm bg-black/70 motion-safe:animate-pulse-soft" />
     </div>
   );
 }
@@ -348,9 +555,11 @@ function VisualModule({
 function StructuredFinanceVisual() {
   return (
     <div className="relative mx-auto min-h-[420px] w-full overflow-hidden rounded-[2rem] border border-black/10 bg-gradient-to-br from-white via-[#f8fafc] to-blue-50/50 shadow-[0_24px_70px_rgba(15,23,42,0.08)]">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(59,130,246,0.14),transparent_42%)]" />
-      <div className="absolute left-1/2 top-1/2 hidden h-[300px] w-[420px] -translate-x-1/2 -translate-y-1/2 rounded-[42%] border border-blue-200/70 md:block" />
-      <div className="absolute left-1/2 top-1/2 hidden h-[210px] w-[315px] -translate-x-1/2 -translate-y-1/2 rounded-[42%] border border-slate-200 md:block" />
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(59,130,246,0.14),transparent_42%)] motion-safe:animate-pulse-soft" />
+      <div className="pointer-events-none absolute left-10 top-10 h-28 w-28 rounded-full bg-blue-100/50 blur-3xl motion-safe:animate-float-slow" />
+      <div className="pointer-events-none absolute bottom-10 right-10 h-24 w-24 rounded-full bg-sky-100/60 blur-3xl motion-safe:animate-float-medium" />
+      <div className="absolute left-1/2 top-1/2 hidden h-[300px] w-[420px] -translate-x-1/2 -translate-y-1/2 rounded-[42%] border border-blue-200/70 md:block motion-safe:animate-float-slow" />
+      <div className="absolute left-1/2 top-1/2 hidden h-[210px] w-[315px] -translate-x-1/2 -translate-y-1/2 rounded-[42%] border border-slate-200 md:block motion-safe:animate-float-medium" />
 
       <div className="absolute left-1/2 top-[7.5rem] hidden h-[5.5rem] w-px -translate-x-1/2 bg-blue-200 md:block" />
       <div className="absolute bottom-[7.5rem] left-1/2 hidden h-[5.5rem] w-px -translate-x-1/2 bg-blue-200 md:block" />
@@ -367,7 +576,8 @@ function StructuredFinanceVisual() {
           key={position}
           className={cn(
             "absolute z-10 hidden h-2.5 w-2.5 rounded-full border-2 border-white bg-blue-500 shadow-[0_0_0_6px_rgba(59,130,246,0.12)] md:block",
-            position
+            position,
+            "motion-safe:animate-pulse-soft"
           )}
         />
       ))}
@@ -393,7 +603,7 @@ function StructuredFinanceVisual() {
         className="bottom-8 left-1/2 -translate-x-1/2"
       />
 
-      <div className="absolute left-1/2 top-1/2 z-20 flex h-32 w-32 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-[2rem] border border-black/10 bg-white shadow-[0_22px_60px_rgba(15,23,42,0.16)]">
+      <div className="absolute left-1/2 top-1/2 z-20 flex h-32 w-32 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-[2rem] border border-black/10 bg-white shadow-[0_22px_60px_rgba(15,23,42,0.16)] motion-safe:animate-float-slow">
         <div className="absolute inset-3 rounded-[1.45rem] border border-blue-100" />
         <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-500/10 text-blue-500">
           <svg
@@ -547,7 +757,7 @@ function FooterSignalVisual() {
           <span
             key={i}
             className={cn(
-              "absolute rounded-full shadow-[0_0_18px_rgba(59,130,246,0.18)]",
+              "absolute rounded-full shadow-[0_0_18px_rgba(59,130,246,0.18)] motion-safe:animate-pulse-soft",
               node.size,
               node.color
             )}
@@ -564,6 +774,7 @@ function FooterSignalVisual() {
 export default function ProLiquidHome() {
   const [scrolled, setScrolled] = useState(false);
   const [activeCard, setActiveCard] = useState(0);
+  const [activeProfileIndex, setActiveProfileIndex] = useState(0);
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 20);
@@ -581,8 +792,53 @@ export default function ProLiquidHome() {
     return () => clearInterval(id);
   }, []);
 
+  useEffect(() => {
+    const id = setInterval(() => {
+      setActiveProfileIndex((index) => (index + 1) % CLIENT_PROFILES.length);
+    }, 15000);
+
+    return () => clearInterval(id);
+  }, []);
+
+  const activeProfile = CLIENT_PROFILES[activeProfileIndex];
+
+  const handleConsultationSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    const formData = new FormData(event.currentTarget);
+    const fullName = String(formData.get("fullName") || "");
+    const email = String(formData.get("email") || "");
+    const companyName = String(formData.get("companyName") || "");
+    const country = String(formData.get("country") || "");
+    const need = String(formData.get("need") || "");
+    const message = String(formData.get("message") || "");
+    const subject = `Consultation request${companyName ? ` - ${companyName}` : ""}`;
+    const body = [
+      `Full name: ${fullName}`,
+      `Email: ${email}`,
+      `Company name: ${companyName}`,
+      `Country: ${country}`,
+      `Need: ${need}`,
+      "",
+      "Message:",
+      message,
+    ].join("\n");
+
+    window.location.href = `mailto:contact@proliquid.lu?subject=${encodeURIComponent(
+      subject
+    )}&body=${encodeURIComponent(body)}`;
+  };
+
   return (
     <main className={cn(PAGE_BG, "min-h-screen overflow-hidden text-black")}>
+      <Head>
+        <title>Proliquid | Luxembourg Accounting & Investment Administration</title>
+        <meta
+          name="description"
+          content="Proliquid helps entrepreneurs, investors, holdings, SPVs and family offices establish, manage and monitor Luxembourg structures through accounting, reporting, banking assistance and a secure financial platform."
+        />
+      </Head>
+
       {/* HEADER */}
       <header
         className={cn(
@@ -598,17 +854,17 @@ export default function ProLiquidHome() {
           </a>
 
           <div className="hidden items-center gap-9 text-xs font-semibold md:flex">
-            <a href="#home" className="text-blue-500 no-underline">
-              Home
-            </a>
             <a href="#services" className="text-black no-underline">
               Services
             </a>
             <a href="#technology" className="text-black no-underline">
               Platform
             </a>
-            <a href="#about" className="text-black no-underline">
-              About
+            <a href="#luxembourg" className="text-black no-underline">
+              Luxembourg
+            </a>
+            <a href="#contact" className="text-black no-underline">
+              Contact
             </a>
           </div>
 
@@ -623,39 +879,32 @@ export default function ProLiquidHome() {
 
       {/* HERO */}
       <section id="home" className="relative px-6 pb-16 pt-32 md:pt-40">
-        <div className="pointer-events-none absolute left-1/2 top-16 h-[32rem] w-[32rem] -translate-x-1/2 rounded-full bg-blue-500/10 blur-3xl" />
+        <div className="pointer-events-none absolute left-1/2 top-16 h-[32rem] w-[32rem] -translate-x-1/2 rounded-full bg-blue-500/10 blur-3xl motion-safe:animate-float-slow" />
+        <div className="pointer-events-none absolute left-[8%] top-28 hidden h-28 w-28 rounded-[2rem] bg-white/45 blur-2xl motion-safe:animate-float-medium md:block" />
+        <div className="pointer-events-none absolute right-[8%] top-40 hidden h-36 w-36 rounded-full bg-slate-950/5 blur-3xl motion-safe:animate-pulse-soft lg:block" />
         <div className="relative mx-auto grid max-w-7xl items-center gap-14 md:grid-cols-[1.05fr_0.95fr]">
           <Reveal>
-            <h1 className="max-w-3xl text-[3.2rem] font-black leading-[0.98] tracking-[-0.07em] text-black md:text-[5.4rem]">
-              A Modern Finance Platform For Modern Investment Structures
+            <h1 className="max-w-3xl text-[3rem] font-black leading-[0.98] tracking-[-0.07em] text-black md:text-[5.4rem]">
+              Luxembourg Structures. Managed Properly.
             </h1>
 
-            <p className={cn(PARAGRAPH, "mt-10 max-w-2xl text-black/72")}>
-              Proliquid helps SPVs, holding companies, private investment
-              vehicles and family offices run cleaner accounting, reporting,
-              investor access and operational workflows from one controlled
-              platform.
+            <p className={cn(PARAGRAPH, "mt-10 mb-10 md:mb-28 max-w-2xl text-black/72")}>
+              Accounting, corporate administration and investment reporting for
+              entrepreneurs, holding companies, SPVs and family offices operating
+              through Luxembourg.
             </p>
 
-            <div className="mt-9">
-              <a href="#services" className={BTN_BLUE}>
-                Explore More{" "}
-                <span className="transition-transform duration-200 group-hover:translate-x-0.5 group-hover:-translate-y-0.5">
-                  ↗
-                </span>
-              </a>
-            </div>
-
-            <div className="mt-14 grid grid-cols-2 gap-3 text-xs font-black text-black/75 md:grid-cols-4">
-              {PILLARS.map((p) => (
-                <div
-                  key={p}
-                  className="flex items-center gap-2 rounded-full border border-black/10 bg-white/70 px-3 py-2 shadow-sm backdrop-blur"
-                >
+            <div className="mt-8 grid max-w-xl gap-3 text-sm font-semibold text-black/70 sm:grid-cols-2">
+              {SERVICE_PROOF_POINTS.map((point) => (
+                <div key={point} className="flex items-center gap-3">
                   <span className="h-2 w-2 rounded-full bg-blue-500 shadow-[0_0_0_4px_rgba(59,130,246,0.12)]" />
-                  {p}
+                  {point}
                 </div>
               ))}
+            </div>
+
+            <div className="mt-9 flex flex-col gap-4 sm:flex-row sm:items-center">
+            
             </div>
           </Reveal>
 
@@ -665,25 +914,86 @@ export default function ProLiquidHome() {
         </div>
       </section>
 
+      {/* CONSULTATION STRIP */}
+      <section className="relative px-6 pb-8">
+        <div className="pointer-events-none absolute left-1/2 top-0 h-40 w-80 -translate-x-1/2 rounded-full bg-blue-500/8 blur-3xl motion-safe:animate-float-slow" />
+        <Reveal
+          className={cn(
+            CARD,
+            "relative mx-auto flex max-w-7xl flex-col gap-6 px-7 py-7 md:flex-row md:items-center md:justify-between md:px-9"
+          )}
+        >
+          <div>
+            <h2 className="text-xl font-black tracking-[-0.03em] text-black md:text-2xl">
+              Need a Luxembourg structure, accountant or reporting setup?
+            </h2>
+            <p className="mt-3 max-w-3xl text-sm font-medium leading-6 text-black/58">
+              Tell us what you are building. We will help you understand the
+              right setup, administration process and expected next steps.
+            </p>
+          </div>
+          <a href="#contact" className={cn(BTN_DARK, "shrink-0")}>
+            Request Consultation{" "}
+            <span className="transition-transform duration-200 group-hover:translate-x-0.5 group-hover:-translate-y-0.5">
+              ↗
+            </span>
+          </a>
+        </Reveal>
+      </section>
+
+      {/* WHY LUXEMBOURG */}
+      <section id="luxembourg" className={cn(SECTION_Y, "relative overflow-hidden")}>
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-32 bg-[radial-gradient(circle_at_top,rgba(59,130,246,0.08),transparent_70%)]" />
+        <div className="pointer-events-none absolute left-[8%] top-24 hidden h-24 w-24 rounded-full bg-blue-500/8 blur-3xl motion-safe:animate-float-slow lg:block" />
+        <div className={CONTAINER}>
+          <Reveal className="max-w-4xl">
+            <div className={cn(BADGE, "normal-case tracking-normal")}>
+              Luxembourg credibility
+            </div>
+            <h2 className={cn(H2, "mt-8")}>Why Luxembourg</h2>
+            <p className={cn(PARAGRAPH, "mt-6 max-w-3xl")}>
+              A stable, reputable and internationally recognized financial center
+              for entrepreneurs, investors and cross-border structures.
+            </p>
+          </Reveal>
+
+          <div className="mt-10 grid gap-5 md:grid-cols-2 xl:grid-cols-4">
+            {LUXEMBOURG_REASONS.map((item, index) => (
+              <Reveal
+                key={item.title}
+                delay={index * 70}
+                className={cn(
+                  MUTED_CARD,
+                  "p-6 transition-all duration-300 hover:-translate-y-0.5 hover:scale-[1.01] hover:border-blue-200 hover:shadow-[0_20px_50px_rgba(15,23,42,0.08)]"
+                )}
+              >
+                <span className="inline-flex h-3 w-3 rounded-full bg-blue-500 shadow-[0_0_0_6px_rgba(59,130,246,0.12)] motion-safe:animate-pulse-soft" />
+                <h3 className="mt-5 text-lg font-black leading-6">{item.title}</h3>
+                <p className="mt-4 text-sm font-medium leading-6 text-black/55">
+                  {item.description}
+                </p>
+              </Reveal>
+            ))}
+          </div>
+        </div>
+      </section>
+
       {/* GLOBAL SERVICES CARD */}
       <section id="services" className="px-6 py-10 md:py-14">
         <Reveal className={cn(CARD, "mx-auto max-w-7xl px-7 py-10 md:px-10 md:py-12")}>
           <div className="grid gap-10 lg:grid-cols-[1fr_1.1fr]">
             <h2 className={cn(H2, "max-w-xl")}>
-              We Provide You With Clear Investment Operations
+              What We Do
             </h2>
 
             <div className="flex flex-col justify-center">
               <p className={cn(PARAGRAPH, "max-w-xl")}>
-                We are building a structured financial administration layer for
-                modern investment vehicles. The goal is simple: better data,
-                faster reporting, cleaner documentation and stronger control
-                over every operation.
+                Financial administration supported by modern technology.
               </p>
 
               <div className="mt-8">
                 <a href="#contact" className={BTN_DARK}>
-                  Request Access{" "}
+                  Request Consultation{" "}
                   <span className="transition-transform duration-200 group-hover:translate-x-0.5 group-hover:-translate-y-0.5">
                     ↗
                   </span>
@@ -692,13 +1002,13 @@ export default function ProLiquidHome() {
             </div>
           </div>
 
-          <div className="mt-16 grid gap-7 md:grid-cols-4">
+          <div className="mt-16 grid gap-7 md:grid-cols-2 lg:grid-cols-3">
             {SERVICES.map((service, index) => (
               <Reveal
                 key={service.title}
                 delay={index * 80}
                 className={cn(
-                  "min-h-[360px] rounded-[1.5rem] border p-7 text-center transition-all duration-200 hover:-translate-y-0.5 hover:border-blue-500/20 hover:shadow-[0_18px_45px_rgba(15,23,42,0.08)]",
+                  "min-h-[330px] rounded-[1.5rem] border p-7 text-center transition-all duration-200 hover:-translate-y-0.5 hover:scale-[1.01] hover:border-blue-500/20 hover:shadow-[0_18px_45px_rgba(15,23,42,0.08)]",
                   index === 0
                     ? "border-black/5 bg-[#f4f4f7]"
                     : "border-black/5 bg-white"
@@ -709,7 +1019,7 @@ export default function ProLiquidHome() {
                 </h3>
 
                 <div className="mt-8">
-                  <ServiceIcon index={index} />
+                  <ServiceIcon index={index % 4} />
                 </div>
 
                 <p className="mt-7 text-xs font-medium leading-6 text-black/50">
@@ -722,36 +1032,20 @@ export default function ProLiquidHome() {
       </section>
 
       {/* FEATURE CARDS */}
-      <section id="technology" className={SECTION_Y}>
+      <section id="technology" className={cn(SECTION_Y, "relative overflow-hidden")}>
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-32 bg-[radial-gradient(circle_at_center,rgba(59,130,246,0.06),transparent_72%)]" />
         <div className={CONTAINER}>
           <Reveal className="mb-10 flex items-end justify-between gap-8">
-            <h2 className={cn(H2, "max-w-2xl")}>
-              Up-To-Date And Fast Financial Services In One Place
-            </h2>
-
-            <div className="hidden items-center gap-3 md:flex">
-              <button
-                type="button"
-                onClick={() =>
-                  setActiveCard(
-                    (activeCard - 1 + FEATURE_CARDS.length) %
-                      FEATURE_CARDS.length
-                  )
-                }
-                className="h-10 w-10 rounded-full border border-black/10 bg-white text-black shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-black/20 hover:shadow-md active:translate-y-0"
-              >
-                ←
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  setActiveCard((activeCard + 1) % FEATURE_CARDS.length)
-                }
-                className="h-10 w-14 rounded-full bg-blue-500 text-white shadow-[0_14px_30px_rgba(59,130,246,0.2)] transition-all duration-200 hover:-translate-y-0.5 hover:bg-blue-600 hover:shadow-[0_18px_42px_rgba(59,130,246,0.26)] active:translate-y-0"
-              >
-                →
-              </button>
+            <div>
+              <h2 className={cn(H2, "max-w-2xl")}>The Proliquid Platform</h2>
+              <p className={cn(PARAGRAPH, "mt-5 max-w-2xl")}>
+                Every client receives access to a secure workspace to monitor
+                entities, documents, investments and financial reporting in one
+                place.
+              </p>
             </div>
+
+            
           </Reveal>
 
           <div className="grid gap-7 md:grid-cols-3">
@@ -762,7 +1056,7 @@ export default function ProLiquidHome() {
                 onMouseEnter={() => setActiveCard(index)}
                 className={cn(
                   CARD,
-                  "min-h-[330px] p-9 text-center transition-all duration-200 hover:-translate-y-0.5 hover:border-blue-500/20 hover:shadow-[0_22px_55px_rgba(15,23,42,0.09)]",
+                  "min-h-[330px] p-9 text-center transition-all duration-200 hover:-translate-y-0.5 hover:scale-[1.01] hover:border-blue-500/20 hover:shadow-[0_22px_55px_rgba(15,23,42,0.09)]",
                   activeCard === index && "scale-[1.01] border-blue-500/20"
                 )}
               >
@@ -781,50 +1075,187 @@ export default function ProLiquidHome() {
         </div>
       </section>
 
-      {/* DISTINCTIVE FEATURES */}
-      <section id="about" className={cn(SECTION_BG_LIGHT, "px-6 py-24 md:py-28")}>
-        <div className="mx-auto grid max-w-7xl items-center gap-16 lg:grid-cols-[0.95fr_1.05fr]">
-          <Reveal>
-            <div className={cn(BADGE, "normal-case tracking-normal")}>
-              Built for institutional finance
-            </div>
-
-            <h2 className={cn(H2, "mt-8 max-w-3xl")}>
-              Financial operations.{" "}
-              <span className="text-blue-500">Structured</span> to perform.
-            </h2>
-
-            <p className={cn(PARAGRAPH, "mt-7 max-w-xl")}>
-              Proliquid brings structure, control, and clarity to complex fund
-              accounting, so teams can operate with confidence.
+      {/* WHO WE SERVE */}
+      <section className={SECTION_Y}>
+        <div className={CONTAINER}>
+          <Reveal className="max-w-4xl">
+            <h2 className={cn(H2, "max-w-3xl")}>Who We Serve</h2>
+            <p className={cn(PARAGRAPH, "mt-6 max-w-3xl")}>
+              Built for clients who need credible Luxembourg administration with
+              better visibility and control.
             </p>
+          </Reveal>
 
-            <div className="mt-10 grid gap-4 sm:grid-cols-2">
-              {DISTINCTIVE_FEATURES.map((feature, index) => (
-                <Reveal
-                  key={feature.title}
-                  delay={index * 80}
-                  className="flex gap-4 rounded-[1.25rem] border border-black/10 bg-white p-5 shadow-[0_14px_35px_rgba(15,23,42,0.06)] transition-all duration-200 hover:-translate-y-0.5 hover:border-blue-500/20 hover:shadow-[0_18px_45px_rgba(15,23,42,0.09)]"
-                >
-                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-blue-500">
-                    <FeatureIcon type={feature.icon} />
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-black leading-5">
-                      {feature.title}
-                    </h3>
-                    <p className="mt-2 text-sm font-semibold leading-6 text-black/55">
-                      {feature.description}
-                    </p>
-                  </div>
-                </Reveal>
-              ))}
+          <Reveal className="mt-10">
+            <div className="-mx-6 overflow-x-auto px-6 pb-3">
+              <div className="flex min-w-max gap-5 border-b border-black/10">
+                {CLIENT_PROFILES.map((profile, index) => {
+                  const isActive = index === activeProfileIndex;
+
+                  return (
+                    <button
+                      key={profile.label}
+                      type="button"
+                      aria-pressed={isActive}
+                      onClick={() => setActiveProfileIndex(index)}
+                      className={cn(
+                        "relative -mb-px flex items-center gap-2 px-1 pb-3 pt-1 text-xs font-semibold transition-all duration-300",
+                        isActive
+                          ? "text-black"
+                          : "text-black/45 hover:text-black/80"
+                      )}
+                    >
+                      {isActive && (
+                        <span className="h-1.5 w-1.5 rounded-full bg-blue-500 shadow-[0_0_0_5px_rgba(59,130,246,0.10)] motion-safe:animate-profile-dot" />
+                      )}
+                      {profile.label}
+                      {isActive && (
+                        <span className="absolute bottom-0 left-0 h-px rounded-full bg-blue-500 motion-safe:animate-profile-progress" />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </Reveal>
 
-          <Reveal delay={120}>
-            <StructuredFinanceVisual />
+          <div
+            key={activeProfile.title}
+            className="mt-7 grid gap-7 transition-all duration-500 motion-safe:animate-profile-enter lg:grid-cols-[0.8fr_1.2fr]"
+          >
+            <Reveal
+              className={cn(
+                "relative min-h-[280px] md:mb-36 overflow-hidden rounded-[2rem] border border-black/5 bg-white p-8 shadow-[0_16px_46px_rgba(15,23,42,0.045)] md:p-20"
+              )}
+            >
+              <div className="pointer-events-none absolute left-1/2 top-1/2 h-56 w-56 -translate-x-1/2 -translate-y-1/2 rounded-full bg-blue-500/7 blur-3xl motion-safe:animate-float-slow" />
+              <div className="relative flex h-full min-h-[220px] flex-col justify-center">
+                <span className="mb-8 h-3 w-3 rounded-full bg-blue-500 shadow-[0_0_0_7px_rgba(59,130,246,0.10)] motion-safe:animate-profile-dot" />
+                <h3 className="max-w-md text-4xl font-black leading-[1.02] tracking-[-0.055em] text-black md:text-5xl">
+                  {activeProfile.title}
+                </h3>
+              </div>
+            </Reveal>
+
+            <Reveal
+              delay={80}
+              className={cn(
+                "relative overflow-hidden rounded-[2rem] border border-black/5 bg-[#f8f8fa] p-8 shadow-[0_16px_46px_rgba(15,23,42,0.04)] md:p-10"
+              )}
+            >
+              <div className="relative">
+                <h3 className="text-xs font-black uppercase tracking-[0.16em] text-black/40">
+                  Typical needs
+                </h3>
+                <ul className="mt-6 grid gap-4">
+                  {activeProfile.needs.map((need) => (
+                    <li
+                      key={need}
+                      className="flex items-start gap-4 text-sm font-semibold leading-7 text-black/70 md:text-base"
+                    >
+                      <span className="mt-3 h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500" />
+                      {need}
+                    </li>
+                  ))}
+                </ul>
+
+                <div className="my-9 h-px bg-black/10" />
+
+                <h3 className="text-xs font-black uppercase tracking-[0.16em] text-black/40">
+                  How Proliquid helps
+                </h3>
+                <p className="mt-5 max-w-2xl text-sm font-medium leading-7 text-black/60 md:text-base">
+                  {activeProfile.value}
+                </p>
+              </div>
+            </Reveal>
+          </div>
+        </div>
+      </section>
+
+      {/* WHY PROLIQUID */}
+      <section
+        id="about"
+        className={cn(SECTION_BG_LIGHT, "relative overflow-hidden px-6 py-24 md:py-36")}
+      >
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-28 bg-[radial-gradient(circle_at_center,rgba(59,130,246,0.08),transparent_72%)]" />
+        <div className="mx-auto max-w-7xl">
+          <Reveal className="max-w-4xl">
+            <div className={cn(BADGE, "normal-case tracking-normal")}>
+              Why Proliquid
+            </div>
+            <h2 className={cn(H2, "mt-8 max-w-3xl")}>
+              A more controlled way to manage Luxembourg financial structures.
+            </h2>
+            <p className={cn(PARAGRAPH, "mt-6 max-w-3xl")}>
+              The service remains human and Luxembourg-focused. The platform
+              makes the administration cleaner, more visible and easier to
+              govern.
+            </p>
           </Reveal>
+
+          <div className="mt-10 grid gap-6 lg:grid-cols-2">
+            {COMPARISON_ITEMS.map((column, index) => (
+              <Reveal
+                key={column.title}
+                delay={index * 100}
+                className={cn(
+                  index === 0 ? MUTED_CARD : CARD,
+                  "p-7 md:p-8"
+                )}
+              >
+                <h3 className="text-xl font-black tracking-[-0.03em] text-black">
+                  {column.title}
+                </h3>
+                <div className="mt-7 grid gap-4">
+                  {column.items.map((item) => (
+                    <div
+                      key={item}
+                      className="flex items-center gap-4 text-sm font-semibold leading-6 text-black/65"
+                    >
+                      <span
+                        className={cn(
+                          "h-2 w-2 shrink-0 rounded-full",
+                          index === 0 ? "bg-black/25" : "bg-blue-500"
+                        )}
+                      />
+                      {item}
+                    </div>
+                  ))}
+                </div>
+              </Reveal>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* CLIENT JOURNEY */}
+      <section className="px-6 pt-8 pb-24 bg-white">
+        <div className={cn(CONTAINER, CARD, "px-7 py-10 md:px-10 md:py-12")}>
+          <Reveal className="max-w-4xl">
+            <h2 className={cn(H2, "max-w-3xl")}>Typical Client Journey</h2>
+          </Reveal>
+
+          <div className="mt-10 grid gap-5 lg:grid-cols-5">
+            {CLIENT_JOURNEY.map((step, index) => (
+              <Reveal
+                key={step.title}
+                delay={index * 70}
+                className={cn(
+                  MUTED_CARD,
+                  "relative p-6 transition-all duration-300 hover:-translate-y-0.5 hover:scale-[1.01] hover:border-blue-200 hover:shadow-[0_20px_50px_rgba(15,23,42,0.08)]"
+                )}
+              >
+                <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-blue-500 text-xs font-black text-white">
+                  {index + 1}
+                </span>
+                <h3 className="mt-5 text-lg font-black leading-6">{step.title}</h3>
+                <p className="mt-4 text-sm font-medium leading-6 text-black/55">
+                  {step.description}
+                </p>
+              </Reveal>
+            ))}
+          </div>
         </div>
       </section>
 
@@ -834,27 +1265,32 @@ export default function ProLiquidHome() {
         className="relative overflow-hidden bg-[#18181b] px-6 pt-24 text-white"
       >
         <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/25 to-transparent" />
-        <div className="pointer-events-none absolute right-0 top-0 h-80 w-80 rounded-full bg-blue-500/10 blur-3xl" />
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-28 bg-[radial-gradient(circle_at_center,rgba(59,130,246,0.08),transparent_72%)]" />
+        <div className="pointer-events-none absolute right-0 top-0 h-80 w-80 rounded-full bg-blue-500/10 blur-3xl motion-safe:animate-float-slow" />
+        <div className="pointer-events-none absolute left-0 bottom-16 hidden h-40 w-40 rounded-full bg-white/6 blur-3xl motion-safe:animate-float-medium lg:block" />
         <div className="mx-auto grid max-w-7xl gap-16 pb-20 md:grid-cols-[1fr_1fr_1.2fr]">
           <Reveal>
             <LogoMark />
             <p className="mt-8 max-w-xs text-xs font-medium leading-6 text-white/45">
-              A modern finance administration platform for SPVs, holding
-              companies, private investment vehicles and family offices.
+              Accounting, corporate and investment administration for Luxembourg
+              structures, supported by the Proliquid platform.
             </p>
           </Reveal>
 
           <Reveal delay={80}>
             <h3 className="text-sm font-black">Quick Access</h3>
             <div className="mt-6 grid grid-cols-2 gap-4 text-sm text-white/70">
-              <a href="#about" className="no-underline transition hover:text-white">
-                About Us
-              </a>
               <a href="#services" className="no-underline transition hover:text-white">
                 Services
               </a>
               <a href="#technology" className="no-underline transition hover:text-white">
                 Platform
+              </a>
+              <a href="#luxembourg" className="no-underline transition hover:text-white">
+                Luxembourg
+              </a>
+              <a href="#contact" className="no-underline transition hover:text-white">
+                Contact
               </a>
               <a href="/login" className="no-underline transition hover:text-white">
                 Login
@@ -863,31 +1299,101 @@ export default function ProLiquidHome() {
           </Reveal>
 
           <Reveal delay={160}>
-            <h3 className="max-w-md text-sm font-black leading-6">
-              To Receive More Information, Enter Your Email So That We Can
-              Contact You
+            <h3 className="max-w-md text-3xl font-black leading-[1.05] tracking-[-0.05em] md:text-4xl">
+              Let&apos;s discuss your Luxembourg structure
             </h3>
+            <p className="mt-5 max-w-md text-sm font-medium leading-6 text-white/60">
+              Tell us about your project and we will contact you to discuss the
+              most suitable setup, accounting and reporting support.
+            </p>
 
-            <form className="mt-8 flex max-w-md overflow-hidden rounded-full border border-white/10 bg-white shadow-[0_18px_48px_rgba(0,0,0,0.18)]">
-              <input
-                type="email"
-                placeholder="Enter Email Address"
-                className="min-w-0 flex-1 px-6 py-4 text-sm font-semibold text-black outline-none placeholder:text-black/35"
-              />
-              <button
-                type="submit"
-                className="group bg-blue-500 px-7 text-sm font-black text-white transition-all duration-200 hover:bg-blue-600 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-300/30"
-              >
-                Subscribe{" "}
+            <form onSubmit={handleConsultationSubmit} className="mt-8 grid gap-4">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="grid gap-2 text-xs font-black uppercase tracking-[0.14em] text-white/40">
+                  Full name
+                  <input
+                    name="fullName"
+                    required
+                    className="rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-semibold normal-case tracking-normal text-white outline-none transition placeholder:text-white/25 focus:border-blue-400/60"
+                    placeholder="Your name"
+                  />
+                </label>
+                <label className="grid gap-2 text-xs font-black uppercase tracking-[0.14em] text-white/40">
+                  Email
+                  <input
+                    name="email"
+                    type="email"
+                    required
+                    className="rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-semibold normal-case tracking-normal text-white outline-none transition placeholder:text-white/25 focus:border-blue-400/60"
+                    placeholder="you@example.com"
+                  />
+                </label>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="grid gap-2 text-xs font-black uppercase tracking-[0.14em] text-white/40">
+                  Company name
+                  <input
+                    name="companyName"
+                    className="rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-semibold normal-case tracking-normal text-white outline-none transition placeholder:text-white/25 focus:border-blue-400/60"
+                    placeholder="Company or project"
+                  />
+                </label>
+                <label className="grid gap-2 text-xs font-black uppercase tracking-[0.14em] text-white/40">
+                  Country
+                  <input
+                    name="country"
+                    className="rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-semibold normal-case tracking-normal text-white outline-none transition placeholder:text-white/25 focus:border-blue-400/60"
+                    placeholder="Country"
+                  />
+                </label>
+              </div>
+
+              <label className="grid gap-2 text-xs font-black uppercase tracking-[0.14em] text-white/40">
+                What do you need help with?
+                <select
+                  name="need"
+                  required
+                  className="rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-semibold normal-case tracking-normal text-white outline-none transition focus:border-blue-400/60"
+                  defaultValue=""
+                >
+                  <option value="" disabled>
+                    Select a service
+                  </option>
+                  {CONSULTATION_NEEDS.map((need) => (
+                    <option key={need} value={need} className="text-black">
+                      {need}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="grid gap-2 text-xs font-black uppercase tracking-[0.14em] text-white/40">
+                Message
+                <textarea
+                  name="message"
+                  rows={4}
+                  className="resize-none rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-semibold normal-case tracking-normal text-white outline-none transition placeholder:text-white/25 focus:border-blue-400/60"
+                  placeholder="Briefly describe your structure, timeline or reporting needs."
+                />
+              </label>
+
+              <button type="submit" className={cn(BTN_BLUE, "mt-2 w-full sm:w-fit")}>
+                Request Consultation{" "}
                 <span className="inline-block transition-transform duration-200 group-hover:translate-x-0.5 group-hover:-translate-y-0.5">
                   ↗
                 </span>
               </button>
             </form>
 
-            <div className="mt-8 flex flex-wrap items-center gap-3 text-sm text-white/60">
+            <div className="mt-6 flex flex-wrap items-center gap-3 text-sm text-white/60">
               <span className="h-2 w-2 rounded-full bg-blue-500 shadow-[0_0_0_5px_rgba(59,130,246,0.15)]" />
-              <span>Contact: hello@proliquid.local</span>
+              <a
+                href="mailto:contact@proliquid.lu"
+                className="text-white/70 no-underline transition hover:text-white"
+              >
+                contact@proliquid.lu
+              </a>
             </div>
           </Reveal>
         </div>
@@ -899,6 +1405,95 @@ export default function ProLiquidHome() {
           Copyright © {new Date().getFullYear()} Proliquid. All Rights Reserved.
         </div>
       </section>
+
+      <style jsx global>{`
+        @media (prefers-reduced-motion: no-preference) {
+          .motion-safe\\:animate-float-slow {
+            animation: floatSlow 10s ease-in-out infinite alternate;
+          }
+
+          .motion-safe\\:animate-float-medium {
+            animation: floatMedium 7s ease-in-out infinite alternate;
+          }
+
+          .motion-safe\\:animate-pulse-soft {
+            animation: pulseSoft 8s ease-in-out infinite alternate;
+          }
+
+          .motion-safe\\:animate-profile-progress {
+            animation: profileProgress 15s linear;
+          }
+
+          .motion-safe\\:animate-profile-enter {
+            animation: profileEnter 500ms ease-out;
+          }
+
+          .motion-safe\\:animate-profile-dot {
+            animation: profileDot 3s ease-in-out infinite;
+          }
+        }
+
+        @keyframes floatSlow {
+          0% {
+            transform: translate3d(0, 0, 0);
+          }
+          100% {
+            transform: translate3d(6px, -8px, 0);
+          }
+        }
+
+        @keyframes floatMedium {
+          0% {
+            transform: translate3d(0, 0, 0);
+          }
+          100% {
+            transform: translate3d(-6px, 8px, 0);
+          }
+        }
+
+        @keyframes pulseSoft {
+          0% {
+            opacity: 0.55;
+            transform: scale(1);
+          }
+          100% {
+            opacity: 0.85;
+            transform: scale(1.04);
+          }
+        }
+
+        @keyframes profileProgress {
+          from {
+            width: 0%;
+          }
+          to {
+            width: 100%;
+          }
+        }
+
+        @keyframes profileEnter {
+          from {
+            opacity: 0;
+            transform: translate3d(0, 10px, 0);
+          }
+          to {
+            opacity: 1;
+            transform: translate3d(0, 0, 0);
+          }
+        }
+
+        @keyframes profileDot {
+          0%,
+          100% {
+            opacity: 0.7;
+            transform: scale(1);
+          }
+          50% {
+            opacity: 1;
+            transform: scale(1.15);
+          }
+        }
+      `}</style>
     </main>
   );
 }

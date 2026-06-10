@@ -5,6 +5,7 @@ import {
   getQueryString,
   jsonError,
   jsonSuccess,
+  parseOptionalInteger,
 } from '../../../lib/accounting-api';
 import { AuthenticatedNextApiRequest, withAuth } from '../../../lib/auth';
 import { getCurrentUserRecord } from '../../../lib/entity-access';
@@ -17,9 +18,13 @@ interface CreateDocumentBody {
   transactionId?: unknown;
   counterpartyId?: unknown;
   type?: unknown;
+  title?: unknown;
   fileUrl?: unknown;
   originalFilename?: unknown;
   mimeType?: unknown;
+  fileSize?: unknown;
+  storageProvider?: unknown;
+  storageKey?: unknown;
   status?: unknown;
 }
 
@@ -33,8 +38,21 @@ const parseDocumentType = (value: unknown): DocumentType | null => {
     : null;
 };
 
+const withDocumentDownloadUrl = <T extends { id: string }>(document: T) => ({
+  ...document,
+  downloadUrl: `/api/accounting/documents/${document.id}/download`,
+});
+
 const listDocuments = async (req: AuthenticatedNextApiRequest, res: NextApiResponse) => {
   const entityId = getQueryString(req.query.entityId);
+  const type = parseDocumentType(getQueryString(req.query.type));
+  const status = getQueryString(req.query.status);
+  const counterpartyId = getQueryString(req.query.counterpartyId);
+  const transactionId = getQueryString(req.query.transactionId);
+  const rawLimit = Number(getQueryString(req.query.limit) || 50);
+  const rawOffset = Number(getQueryString(req.query.offset) || 0);
+  const limit = Number.isInteger(rawLimit) ? Math.min(Math.max(rawLimit, 1), 100) : 50;
+  const offset = Number.isInteger(rawOffset) && rawOffset > 0 ? rawOffset : 0;
 
   if (!entityId) {
     return jsonError(res, 400, 'entityId is required');
@@ -44,22 +62,55 @@ const listDocuments = async (req: AuthenticatedNextApiRequest, res: NextApiRespo
     return jsonError(res, 403, 'Forbidden');
   }
 
-  const entity = await prisma.entity.findUnique({ where: { id: entityId } });
+  const entity = await prisma.entity.findUnique({
+    where: { id: entityId },
+    select: { id: true },
+  });
 
   if (!entity) {
     return jsonError(res, 404, 'Entity not found');
   }
 
   const documents = await prisma.document.findMany({
-    where: { entityId },
+    where: {
+      entityId,
+      ...(type ? { type } : {}),
+      ...(status ? { status } : {}),
+      ...(counterpartyId ? { counterpartyId } : {}),
+      ...(transactionId ? { transactionId } : {}),
+    },
     orderBy: { createdAt: 'desc' },
+    take: limit,
+    skip: offset,
     include: {
-      counterparty: true,
-      transaction: true,
+      counterparty: {
+        select: {
+          id: true,
+          name: true,
+          type: true,
+        },
+      },
+      transaction: {
+        select: {
+          id: true,
+          date: true,
+          type: true,
+          amount: true,
+          currency: true,
+          status: true,
+          description: true,
+        },
+      },
+      uploadedBy: {
+        select: {
+          id: true,
+          email: true,
+        },
+      },
     },
   });
 
-  return jsonSuccess(res, documents);
+  return jsonSuccess(res, documents.map(withDocumentDownloadUrl));
 };
 
 const createDocument = async (req: AuthenticatedNextApiRequest, res: NextApiResponse) => {
@@ -69,6 +120,7 @@ const createDocument = async (req: AuthenticatedNextApiRequest, res: NextApiResp
   const counterpartyId = getOptionalString(body.counterpartyId);
   const type = parseDocumentType(body.type);
   const fileUrl = getOptionalString(body.fileUrl);
+  const fileSize = parseOptionalInteger(body.fileSize);
 
   if (!entityId) {
     return jsonError(res, 400, 'entityId is required');
@@ -86,7 +138,10 @@ const createDocument = async (req: AuthenticatedNextApiRequest, res: NextApiResp
     return jsonError(res, 400, 'fileUrl is required');
   }
 
-  const entity = await prisma.entity.findUnique({ where: { id: entityId } });
+  const entity = await prisma.entity.findUnique({
+    where: { id: entityId },
+    select: { id: true, organizationId: true },
+  });
 
   if (!entity) {
     return jsonError(res, 404, 'Entity not found');
@@ -127,14 +182,41 @@ const createDocument = async (req: AuthenticatedNextApiRequest, res: NextApiResp
         transactionId,
         counterpartyId,
         type,
+        title: getOptionalString(body.title),
         fileUrl,
         originalFilename: getOptionalString(body.originalFilename),
         mimeType: getOptionalString(body.mimeType),
+        fileSize: fileSize ?? undefined,
+        storageProvider: getOptionalString(body.storageProvider),
+        storageKey: getOptionalString(body.storageKey),
+        uploadedByUserId: req.user.id,
         status: getOptionalString(body.status) || 'UPLOADED',
       },
       include: {
-        counterparty: true,
-        transaction: true,
+        counterparty: {
+          select: {
+            id: true,
+            name: true,
+            type: true,
+          },
+        },
+        transaction: {
+          select: {
+            id: true,
+            date: true,
+            type: true,
+            amount: true,
+            currency: true,
+            status: true,
+            description: true,
+          },
+        },
+        uploadedBy: {
+          select: {
+            id: true,
+            email: true,
+          },
+        },
       },
     });
     await createAuditLog(tx, {
@@ -147,6 +229,9 @@ const createDocument = async (req: AuthenticatedNextApiRequest, res: NextApiResp
       metadata: {
         type: created.type,
         status: created.status,
+        fileName: created.originalFilename,
+        mimeType: created.mimeType,
+        fileSize: created.fileSize,
         transactionId: created.transactionId,
         counterpartyId: created.counterpartyId,
       },
@@ -154,7 +239,7 @@ const createDocument = async (req: AuthenticatedNextApiRequest, res: NextApiResp
     return created;
   });
 
-  return jsonSuccess(res, document, 201);
+  return jsonSuccess(res, withDocumentDownloadUrl(document), 201);
 };
 
 export default withAuth(async (req: AuthenticatedNextApiRequest, res: NextApiResponse) => {

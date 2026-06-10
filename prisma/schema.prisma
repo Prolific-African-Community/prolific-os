@@ -128,10 +128,13 @@ enum JournalEntryStatus {
 }
 
 enum DocumentType {
+  SUPPLIER_INVOICE
+  CUSTOMER_INVOICE
   INVOICE
   RECEIPT
   BANK_STATEMENT
   CONTRACT
+  TAX_DOCUMENT
   REPORT
   INVESTOR_REPORT
   CAPITAL_CALL_NOTICE
@@ -154,6 +157,7 @@ model User {
   createdBusinessTransactions BusinessTransaction[] @relation("BusinessTransactionCreatedBy")
   postedJournalEntries        JournalEntry[]        @relation("JournalEntryPostedBy")
   createdJournalEntries       JournalEntry[]        @relation("JournalEntryCreatedBy")
+  uploadedDocuments           Document[]            @relation("DocumentUploadedBy")
   auditLogs                   AuditLog[]
 }
 
@@ -535,17 +539,26 @@ model Document {
   counterpartyId   String?
   counterparty     Counterparty?        @relation(fields: [counterpartyId], references: [id], onDelete: SetNull)
   type             DocumentType
+  title            String?
   fileUrl          String
   originalFilename String?
   mimeType         String?
+  fileSize         Int?
+  storageProvider  String?
+  storageKey       String?
+  uploadedByUserId String?
+  uploadedBy       User?                @relation("DocumentUploadedBy", fields: [uploadedByUserId], references: [id], onDelete: SetNull)
   status           String               @default("UPLOADED")
   createdAt        DateTime             @default(now())
   updatedAt        DateTime             @updatedAt
 
   @@index([entityId])
   @@index([entityId, createdAt])
+  @@index([entityId, type])
+  @@index([entityId, status])
   @@index([counterpartyId])
   @@index([transactionId])
+  @@index([uploadedByUserId])
 }
 
 model AuditLog {

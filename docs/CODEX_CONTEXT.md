@@ -374,7 +374,10 @@ Purpose:
 * create/list documents
 * link documents to transactions
 * link documents to counterparties
-* later support real file upload
+* upload real internal accounting documents
+* store document metadata in the database
+* store files through Vercel Blob
+* support future extraction/review workflows without OCR or AI in the upload step
 
 ## Reporting
 
@@ -861,6 +864,9 @@ Completed or functionally validated:
 * legacy fund route compatibility
 * Admin Console prompt
 * Organization User Management prompt
+* Step 14 — Performance Audit & Optimization
+* Step 14B — Database indexes, query optimization, payload reduction and duplicate fetch cleanup
+* Step 15 — Real Document Upload to private Vercel Blob
 
 ---
 
@@ -868,76 +874,64 @@ Completed or functionally validated:
 
 Current next priorities:
 
-## Step 1 — Ensure Entity creation is fully operational
+## Step 15B — Secure Private Document Download
 
-* `/dashboard` must show `+ Create Entity`
-* ORG_ADMIN must create Entities
-* created Entity redirects to `/dashboard/entity/[entityId]`
+Current step.
 
-## Step 2 — Ensure Project creation uses Entity
+Scope:
 
-* Project creation must use `entityId`
-* New Project flows must not require `fundId`
-* legacy Fund project routes may remain compatible
+* secure server-side opening/downloading of private Vercel Blob documents
+* authenticated backend route checks Entity permissions before serving file bytes
+* frontend must never open private Blob URLs directly
+* documents should be accessed through `/api/accounting/documents/[id]/download`
+* `BLOB_READ_WRITE_TOKEN` must remain server-side only
 
-## Step 3 — Accounting Setup V1
+Exclusions:
 
-Inside Entity Setup tab:
+* no OCR
+* no AI extraction
+* no invoice parsing
+* no automatic accounting
+* no automatic journal posting
 
-* Chart of Accounts UI
-* Accounting Rules UI
-* create/toggle accounts
-* create/toggle rules
-* adapt accounting logic by Entity
+## Step 15 — Real Document Upload
 
-## Step 4 — Accounting Template System
+Implemented.
 
-Add:
+Scope:
 
-* AccountingTemplate
-* AccountingTemplateAccount
-* AccountingTemplateRule
-* Apply template to Entity
+* real file upload for internal accounting documents
+* private Vercel Blob storage using `BLOB_READ_WRITE_TOKEN`
+* document metadata stored in the database
+* documents linked to Entity
+* optional links to Counterparty and BusinessTransaction where supported
+* uploaded documents visible in the Entity Documents tab
+* upload audit event
 
-## Step 5 — Luxembourg PCN Template
+Exclusions:
 
-* create controlled Luxembourg PCN template
-* default to Luxembourg PCN / LUX_GAAP
-* do not allow Organizations to upload arbitrary chart of accounts
-* import template from controlled repo file and script
+* no OCR
+* no AI extraction
+* no invoice parsing
+* no automatic accounting transactions
+* no automatic journal entry creation
+* no automatic posting
+* no bank reconciliation
+* no homepage or public site changes
 
-## Step 6 — Full Luxembourg PCN Import
+## Future Steps
 
-* obtain reliable official source
-* clean/validate source file
-* import full PCN into system template
-* never fake full PCN data
+* Step 16 — Document Intake Workflow
+* Step 17 — Text Extraction / OCR V1
+* Step 18 — AI-Assisted Invoice Extraction
+* Step 19 — Pre-accounting Draft
+* Step 20 — Human Review Queue
+* Step 21 — Bank Statement Import
+* Step 22 — Matching & Reconciliation
+* Step 23 — Advanced Reporting
+* Step 24 — Closing Workflow
 
-## Step 7 — Accounting Periods and Closing
-
-* open/close accounting periods
-* block posting in closed periods
-* reporting by period
-
-## Step 8 — Real Document Upload
-
-* replace manual fileUrl with real storage
-* support invoices, contracts, reports, bank statements
-
-## Step 9 — OCR / AI-Assisted Extraction
-
-Later only.
-
-* extract invoice data
-* suggest transaction type
-* suggest account/rule
-* human validation required
-
-## Step 10 — Bank Import and Reconciliation
-
-Later.
-
-* import CSV / CAMT / MT940
+Document and bank automation must remain future work until Step 15 upload/storage is stable.
 * match invoices and payments
 * bank reconciliation
 

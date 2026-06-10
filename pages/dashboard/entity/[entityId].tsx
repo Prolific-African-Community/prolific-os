@@ -1,4 +1,4 @@
-import { FormEvent, Fragment, useEffect, useMemo, useState } from "react";
+import { FormEvent, Fragment, MouseEvent, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/router";
 
 type WorkspaceTab =
@@ -224,15 +224,24 @@ interface AccountingDocument {
   entityId: string;
   transactionId?: string | null;
   counterpartyId?: string | null;
+  title?: string | null;
   type: string;
   fileUrl: string;
+  downloadUrl?: string | null;
   originalFilename?: string | null;
   mimeType?: string | null;
+  fileSize?: number | null;
+  storageProvider?: string | null;
+  storageKey?: string | null;
   status: string;
   createdAt: string;
   updatedAt: string;
   counterparty?: Counterparty | null;
   transaction?: Transaction | null;
+  uploadedBy?: {
+    id: string;
+    email: string;
+  } | null;
 }
 
 interface GeneralLedgerLine {
@@ -317,10 +326,9 @@ interface CounterpartyForm {
 }
 
 interface DocumentForm {
+  file: File | null;
   type: string;
-  fileUrl: string;
-  originalFilename: string;
-  mimeType: string;
+  title: string;
   counterpartyId: string;
   transactionId: string;
 }
@@ -385,10 +393,11 @@ const COUNTERPARTY_TYPES = [
   "OTHER",
 ];
 const DOCUMENT_TYPES = [
-  "INVOICE",
-  "RECEIPT",
+  "SUPPLIER_INVOICE",
+  "CUSTOMER_INVOICE",
   "BANK_STATEMENT",
   "CONTRACT",
+  "TAX_DOCUMENT",
   "REPORT",
   "OTHER",
 ];
@@ -456,10 +465,9 @@ const initialCounterpartyForm = (): CounterpartyForm => ({
 });
 
 const initialDocumentForm = (): DocumentForm => ({
-  type: "INVOICE",
-  fileUrl: "",
-  originalFilename: "",
-  mimeType: "",
+  file: null,
+  type: "OTHER",
+  title: "",
   counterpartyId: "",
   transactionId: "",
 });
@@ -544,6 +552,13 @@ function formatAmount(value: string | number, currency = "EUR") {
   }).format(amount);
 }
 
+function formatFileSize(value?: number | null) {
+  if (!value || value <= 0) return "—";
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 function hasTrialBalanceActivity(account: TrialBalanceAccount) {
   const debit = Number(account.debit ?? 0);
   const credit = Number(account.credit ?? 0);
@@ -557,6 +572,27 @@ function statusClass(status: string) {
   if (status === "REVERSED") return "bg-slate-100 text-slate-500";
   if (status === "CANCELLED") return "bg-red-50 text-red-600";
   return "bg-amber-50 text-amber-700";
+}
+
+function documentStatusClass(status: string) {
+  if (status === "UPLOADED" || status === "LINKED" || status === "REVIEWED") {
+    return "bg-emerald-50 text-emerald-700";
+  }
+  if (status === "PROCESSING" || status === "EXTRACTED") {
+    return "bg-blue-50 text-blue-700";
+  }
+  if (status === "REJECTED" || status === "FAILED") {
+    return "bg-red-50 text-red-600";
+  }
+  return "bg-slate-100 text-slate-600";
+}
+
+function documentDisplayName(document: AccountingDocument) {
+  return document.title || document.originalFilename || "Untitled document";
+}
+
+function documentDownloadUrl(document: AccountingDocument) {
+  return document.downloadUrl || `/api/accounting/documents/${document.id}/download`;
 }
 
 function total(lines: JournalLine[], field: "debit" | "credit") {
@@ -684,6 +720,8 @@ export default function EntityWorkspacePage() {
   const [submittingProject, setSubmittingProject] = useState(false);
   const [addingCounterparty, setAddingCounterparty] = useState(false);
   const [addingDocument, setAddingDocument] = useState(false);
+  const [openingDocumentId, setOpeningDocumentId] = useState<string | null>(null);
+  const [documentFileInputKey, setDocumentFileInputKey] = useState(0);
   const [addingAccount, setAddingAccount] = useState(false);
   const [previewingAccount, setPreviewingAccount] = useState(false);
   const [addingRule, setAddingRule] = useState(false);
@@ -982,11 +1020,18 @@ export default function EntityWorkspacePage() {
       } else if (tab === "counterparties") {
         if (force || !loadedSections.counterparties) await loadCounterparties();
       } else if (tab === "documents") {
-        await Promise.all([
+        const documentLoads: Promise<void>[] = [
           !force && loadedSections.documents ? Promise.resolve() : loadDocuments(),
-          !force && loadedSections.counterparties ? Promise.resolve() : loadCounterparties(),
-          !force && loadedSections.transactions ? Promise.resolve() : loadTransactions(),
-        ]);
+        ];
+
+        if (entityDetail.permissions.canManageDocuments) {
+          documentLoads.push(
+            !force && loadedSections.counterparties ? Promise.resolve() : loadCounterparties(),
+            !force && loadedSections.transactions ? Promise.resolve() : loadTransactions()
+          );
+        }
+
+        await Promise.all(documentLoads);
       } else if (tab === "reporting") {
         await Promise.all([
           !force && loadedSections.accounts ? Promise.resolve() : loadAccounts(),
@@ -1358,40 +1403,117 @@ export default function EntityWorkspacePage() {
     event.preventDefault();
     if (!entityId) return;
 
+    if (!documentForm.file) {
+      setError("Choose a file to upload.");
+      return;
+    }
+
     setAddingDocument(true);
     setError(null);
     setSuccess(null);
 
     try {
-      const document = await request<AccountingDocument>("/api/accounting/documents", {
+      const formData = new FormData();
+      formData.append("file", documentForm.file);
+      formData.append("entityId", entityId);
+      formData.append("type", documentForm.type);
+
+      if (documentForm.title) {
+        formData.append("title", documentForm.title);
+      }
+
+      if (documentForm.counterpartyId) {
+        formData.append("counterpartyId", documentForm.counterpartyId);
+      }
+
+      if (documentForm.transactionId) {
+        formData.append("transactionId", documentForm.transactionId);
+      }
+
+      const document = await request<AccountingDocument>("/api/accounting/documents/upload", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          entityId,
-          type: documentForm.type,
-          fileUrl: documentForm.fileUrl,
-          originalFilename: documentForm.originalFilename || undefined,
-          mimeType: documentForm.mimeType || undefined,
-          counterpartyId: documentForm.counterpartyId || undefined,
-          transactionId: documentForm.transactionId || undefined,
-        }),
+        body: formData,
       });
 
       setDocumentForm(initialDocumentForm());
+      setDocumentFileInputKey((current) => current + 1);
       setDocuments((current) => [document, ...current]);
       updateEntitySummary((summary) => ({
         ...summary,
         documentsCount: summary.documentsCount + 1,
       }));
-      setSuccess("Document linked to this entity workspace.");
+      setSuccess("Document uploaded and linked to this entity workspace.");
     } catch (documentError) {
       setError(
         documentError instanceof Error
           ? documentError.message
-          : "Unable to add document"
+          : "Unable to upload document"
       );
     } finally {
       setAddingDocument(false);
+    }
+  };
+
+  const handleOpenDocument = async (
+    event: MouseEvent<HTMLAnchorElement>,
+    document: AccountingDocument
+  ) => {
+    event.preventDefault();
+
+    const token = localStorage.getItem("token");
+
+    if (!token) {
+      router.replace("/login");
+      setError("Your session has expired. Please sign in again.");
+      return;
+    }
+
+    setOpeningDocumentId(document.id);
+    setError(null);
+
+    try {
+      const response = await fetch(documentDownloadUrl(document), {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (response.status === 401) {
+        localStorage.removeItem("token");
+        router.replace("/login");
+        throw new Error("Your session has expired. Please sign in again.");
+      }
+
+      if (!response.ok) {
+        let message = "Unable to open document";
+
+        try {
+          const payload = (await response.clone().json()) as { message?: string };
+          message = payload.message || message;
+        } catch {
+          // Successful responses are binary; error responses should be JSON.
+        }
+
+        throw new Error(message);
+      }
+
+      const fileBlob = await response.blob();
+      const objectUrl = URL.createObjectURL(fileBlob);
+      const downloadLink = window.document.createElement("a");
+      downloadLink.href = objectUrl;
+      downloadLink.target = "_blank";
+      downloadLink.rel = "noopener noreferrer";
+      downloadLink.click();
+
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+    } catch (downloadError) {
+      setError(
+        downloadError instanceof Error
+          ? downloadError.message
+          : "Unable to open document"
+      );
+    } finally {
+      setOpeningDocumentId(null);
     }
   };
 
@@ -2718,13 +2840,35 @@ export default function EntityWorkspacePage() {
                 Entity records
               </p>
               <h2 className="mt-3 text-xl font-semibold tracking-[-0.03em]">
-                Add document
+                Upload document
               </h2>
 
               <form
                 onSubmit={handleAddDocument}
                 className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4"
               >
+                <label className="md:col-span-2 xl:col-span-2">
+                  <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-black/50">
+                    File
+                  </span>
+                  <input
+                    key={documentFileInputKey}
+                    required
+                    type="file"
+                    onChange={(event) =>
+                      setDocumentForm((current) => ({
+                        ...current,
+                        file: event.target.files?.[0] || null,
+                      }))
+                    }
+                    accept=".pdf,.png,.jpg,.jpeg,.webp,.csv,.xls,.xlsx,.doc,.docx,application/pdf,image/png,image/jpeg,image/webp,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    className={INPUT}
+                  />
+                  <span className="mt-2 block text-xs font-medium text-black/40">
+                    PDF, image, CSV, Excel or Word. Max 10 MB.
+                  </span>
+                </label>
+
                 <label>
                   <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-black/50">
                     Type
@@ -2745,54 +2889,19 @@ export default function EntityWorkspacePage() {
                   </select>
                 </label>
 
-                <label className="xl:col-span-3">
-                  <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-black/50">
-                    File URL
-                  </span>
-                  <input
-                    required
-                    value={documentForm.fileUrl}
-                    onChange={(event) =>
-                      setDocumentForm((current) => ({
-                        ...current,
-                        fileUrl: event.target.value,
-                      }))
-                    }
-                    placeholder="https://... or /documents/example.pdf"
-                    className={INPUT}
-                  />
-                </label>
-
                 <label>
                   <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-black/50">
-                    File name <span className="text-black/30">optional</span>
+                    Title <span className="text-black/30">optional</span>
                   </span>
                   <input
-                    value={documentForm.originalFilename}
+                    value={documentForm.title}
                     onChange={(event) =>
                       setDocumentForm((current) => ({
                         ...current,
-                        originalFilename: event.target.value,
+                        title: event.target.value,
                       }))
                     }
-                    placeholder="invoice-2026-001.pdf"
-                    className={INPUT}
-                  />
-                </label>
-
-                <label>
-                  <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-black/50">
-                    MIME type <span className="text-black/30">optional</span>
-                  </span>
-                  <input
-                    value={documentForm.mimeType}
-                    onChange={(event) =>
-                      setDocumentForm((current) => ({
-                        ...current,
-                        mimeType: event.target.value,
-                      }))
-                    }
-                    placeholder="application/pdf"
+                    placeholder="Supplier invoice January 2026"
                     className={INPUT}
                   />
                 </label>
@@ -2850,7 +2959,7 @@ export default function EntityWorkspacePage() {
                     disabled={addingDocument}
                     className={BUTTON_BLUE}
                   >
-                    {addingDocument ? "Adding..." : "Add document"}
+                    {addingDocument ? "Uploading..." : "Upload document"}
                   </button>
                 </div>
               </form>
@@ -2873,8 +2982,11 @@ export default function EntityWorkspacePage() {
                     <thead className="bg-[#f7f7f9] text-[11px] font-semibold uppercase tracking-[0.14em] text-black/40">
                       <tr>
                         <th className="px-5 py-3">Created</th>
+                        <th className="px-4 py-3">Title</th>
                         <th className="px-4 py-3">Type</th>
-                        <th className="px-4 py-3">File name</th>
+                        <th className="px-4 py-3">Status</th>
+                        <th className="px-4 py-3">File</th>
+                        <th className="px-4 py-3">Size</th>
                         <th className="px-4 py-3">Counterparty</th>
                         <th className="px-4 py-3">Transaction</th>
                         <th className="px-5 py-3 text-right">Action</th>
@@ -2887,10 +2999,26 @@ export default function EntityWorkspacePage() {
                             {formatDate(document.createdAt)}
                           </td>
                           <td className="px-4 py-4 font-semibold text-black/80">
+                            {documentDisplayName(document)}
+                          </td>
+                          <td className="px-4 py-4 font-semibold text-black/80">
                             {document.type}
                           </td>
+                          <td className="px-4 py-4">
+                            <span
+                              className={cn(
+                                "rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em]",
+                                documentStatusClass(document.status)
+                              )}
+                            >
+                              {document.status}
+                            </span>
+                          </td>
                           <td className="px-4 py-4 font-medium text-black/60">
-                            {document.originalFilename || document.fileUrl}
+                            {document.originalFilename || "Stored document"}
+                          </td>
+                          <td className="px-4 py-4 font-medium text-black/60">
+                            {formatFileSize(document.fileSize)}
                           </td>
                           <td className="px-4 py-4 font-medium text-black/60">
                             {document.counterparty?.name || "—"}
@@ -2900,12 +3028,13 @@ export default function EntityWorkspacePage() {
                           </td>
                           <td className="px-5 py-4 text-right">
                             <a
-                              href={document.fileUrl}
+                              href={documentDownloadUrl(document)}
                               target="_blank"
-                              rel="noreferrer"
+                              rel="noreferrer noopener"
+                              onClick={(event) => handleOpenDocument(event, document)}
                               className="rounded-full border border-black/10 px-3 py-2 text-[10px] font-semibold transition hover:border-black hover:bg-black hover:text-white"
                             >
-                              Open
+                              {openingDocumentId === document.id ? "Opening..." : "Open"}
                             </a>
                           </td>
                         </tr>
