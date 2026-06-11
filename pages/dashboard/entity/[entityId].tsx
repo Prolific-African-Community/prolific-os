@@ -351,6 +351,13 @@ interface InvoiceCandidate {
     originalFilename?: string | null;
     type: string;
     status: string;
+    transaction?: {
+      id: string;
+      type: string;
+      amount: string;
+      currency: string;
+      status: string;
+    } | null;
   } | null;
   counterparty?: Counterparty | null;
 }
@@ -441,6 +448,7 @@ const DOCUMENT_TYPES = [
 const DOCUMENT_REVIEW_STATUSES = [
   "UPLOADED",
   "PROCESSING",
+  "LINKED",
   "REVIEWED",
   "REJECTED",
   "FAILED",
@@ -722,6 +730,10 @@ function invoiceCandidateTypeFromDocument(type: string) {
 }
 
 function invoiceCandidateStatusClass(status: string) {
+  if (status === "ACCOUNTING_DRAFT_CREATED") {
+    return "bg-emerald-50 text-emerald-700";
+  }
+
   if (status === "READY_FOR_ACCOUNTING_REVIEW") {
     return "bg-blue-50 text-blue-700";
   }
@@ -730,6 +742,10 @@ function invoiceCandidateStatusClass(status: string) {
 }
 
 function invoiceCandidateStatusLabel(status: string) {
+  if (status === "ACCOUNTING_DRAFT_CREATED") {
+    return "Accounting draft created";
+  }
+
   if (status === "READY_FOR_ACCOUNTING_REVIEW") {
     return "Ready for accounting review";
   }
@@ -883,6 +899,8 @@ export default function EntityWorkspacePage() {
   const [addingCounterparty, setAddingCounterparty] = useState(false);
   const [addingDocument, setAddingDocument] = useState(false);
   const [creatingInvoiceCandidate, setCreatingInvoiceCandidate] = useState(false);
+  const [activeInvoiceCandidateId, setActiveInvoiceCandidateId] =
+    useState<string | null>(null);
   const [openingDocumentId, setOpeningDocumentId] = useState<string | null>(null);
   const [activeDocumentId, setActiveDocumentId] = useState<string | null>(null);
   const [selectedInvoiceCandidateDocumentId, setSelectedInvoiceCandidateDocumentId] =
@@ -1909,6 +1927,7 @@ export default function EntityWorkspacePage() {
     status: "DRAFT" | "READY_FOR_ACCOUNTING_REVIEW"
   ) => {
     setCreatingInvoiceCandidate(true);
+    setActiveInvoiceCandidateId(candidate.id);
     setError(null);
     setSuccess(null);
 
@@ -1945,6 +1964,65 @@ export default function EntityWorkspacePage() {
       );
     } finally {
       setCreatingInvoiceCandidate(false);
+      setActiveInvoiceCandidateId(null);
+    }
+  };
+
+  const handleCreateInvoiceCandidateAccountingDraft = async (
+    candidate: InvoiceCandidate
+  ) => {
+    if (!entityId) return;
+
+    setCreatingInvoiceCandidate(true);
+    setActiveInvoiceCandidateId(candidate.id);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const payload = await request<{
+        candidate: InvoiceCandidate;
+        transaction: Transaction;
+        journalEntry: JournalEntry;
+      }>(`/api/accounting/invoice-candidates/${candidate.id}/create-transaction`, {
+        method: "POST",
+      });
+
+      setInvoiceCandidates((current) =>
+        current.map((item) =>
+          item.id === payload.candidate.id ? payload.candidate : item
+        )
+      );
+      if (selectedInvoiceCandidateId === payload.candidate.id) {
+        resetInvoiceCandidateEditor();
+      }
+      setDocuments((current) =>
+        current.map((item) =>
+          item.id === payload.candidate.documentId
+            ? {
+                ...item,
+                status: "LINKED",
+                transaction: payload.transaction,
+              }
+            : item
+        )
+      );
+
+      if (loadedSections.transactions) {
+        await loadTransactions();
+      }
+
+      await loadEntityDetail();
+
+      setSuccess("Draft accounting transaction created from invoice candidate.");
+    } catch (candidateError) {
+      setError(
+        candidateError instanceof Error
+          ? candidateError.message
+          : "Unable to create draft accounting transaction"
+      );
+    } finally {
+      setCreatingInvoiceCandidate(false);
+      setActiveInvoiceCandidateId(null);
     }
   };
 
@@ -3955,13 +4033,15 @@ export default function EntityWorkspacePage() {
                             {entityDetail.permissions.canManageDocuments && (
                               <td className="px-5 py-4">
                                 <div className="flex flex-wrap items-center justify-end gap-2">
-                                  <button
-                                    type="button"
-                                    onClick={() => startInvoiceCandidateEdit(candidate)}
-                                    className="rounded-full border border-black/10 px-3 py-2 text-[10px] font-semibold text-black/65 transition hover:border-black hover:text-black"
-                                  >
-                                    Edit
-                                  </button>
+                                  {candidate.status !== "ACCOUNTING_DRAFT_CREATED" && (
+                                    <button
+                                      type="button"
+                                      onClick={() => startInvoiceCandidateEdit(candidate)}
+                                      className="rounded-full border border-black/10 px-3 py-2 text-[10px] font-semibold text-black/65 transition hover:border-black hover:text-black"
+                                    >
+                                      Edit
+                                    </button>
+                                  )}
                                   {candidate.status === "DRAFT" ? (
                                     <button
                                       type="button"
@@ -3974,24 +4054,56 @@ export default function EntityWorkspacePage() {
                                       }
                                       className="rounded-full border border-blue-500/20 bg-blue-50 px-3 py-2 text-[10px] font-semibold text-blue-700 transition hover:border-blue-500 hover:bg-blue-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
                                     >
-                                      {creatingInvoiceCandidate
+                                      {creatingInvoiceCandidate &&
+                                      activeInvoiceCandidateId === candidate.id
                                         ? "Updating..."
                                         : "Mark ready"}
                                     </button>
+                                  ) : candidate.status === "READY_FOR_ACCOUNTING_REVIEW" ? (
+                                    <>
+                                      <button
+                                        type="button"
+                                        disabled={creatingInvoiceCandidate}
+                                        onClick={() =>
+                                          handleCreateInvoiceCandidateAccountingDraft(candidate)
+                                        }
+                                        className="rounded-full border border-emerald-500/20 bg-emerald-50 px-3 py-2 text-[10px] font-semibold text-emerald-700 transition hover:border-emerald-500 hover:bg-emerald-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                                      >
+                                        {creatingInvoiceCandidate &&
+                                        activeInvoiceCandidateId === candidate.id
+                                          ? "Creating..."
+                                          : "Create draft"}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        disabled={creatingInvoiceCandidate}
+                                        onClick={() =>
+                                          handleInvoiceCandidateStatus(candidate, "DRAFT")
+                                        }
+                                        className="rounded-full border border-black/10 bg-white px-3 py-2 text-[10px] font-semibold text-black/65 transition hover:border-black hover:text-black disabled:cursor-not-allowed disabled:opacity-50"
+                                      >
+                                        {creatingInvoiceCandidate &&
+                                        activeInvoiceCandidateId === candidate.id
+                                          ? "Updating..."
+                                          : "Reopen"}
+                                      </button>
+                                    </>
                                   ) : (
-                                    <button
-                                      type="button"
-                                      disabled={creatingInvoiceCandidate}
-                                      onClick={() =>
-                                        handleInvoiceCandidateStatus(candidate, "DRAFT")
-                                      }
-                                      className="rounded-full border border-black/10 bg-white px-3 py-2 text-[10px] font-semibold text-black/65 transition hover:border-black hover:text-black disabled:cursor-not-allowed disabled:opacity-50"
-                                    >
-                                      {creatingInvoiceCandidate
-                                        ? "Updating..."
-                                        : "Reopen"}
-                                    </button>
+                                    <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-emerald-700">
+                                      Draft created
+                                    </span>
                                   )}
+                                  {candidate.status !== "DRAFT" &&
+                                  candidate.status !== "READY_FOR_ACCOUNTING_REVIEW" &&
+                                  candidate.document?.transaction ? (
+                                    <span className="text-[10px] font-medium text-black/50">
+                                      {candidate.document.transaction.type}{" "}
+                                      {formatAmount(
+                                        candidate.document.transaction.amount,
+                                        candidate.document.transaction.currency
+                                      )}
+                                    </span>
+                                  ) : null}
                                 </div>
                               </td>
                             )}

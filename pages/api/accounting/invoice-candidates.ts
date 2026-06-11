@@ -47,6 +47,13 @@ const serializeInvoiceCandidate = <
       originalFilename: string | null;
       type: string;
       status: string;
+      transaction?: {
+        id: string;
+        type: string;
+        amount: Prisma.Decimal;
+        currency: string;
+        status: string;
+      } | null;
     } | null;
     counterparty?: {
       id: string;
@@ -90,6 +97,15 @@ const listInvoiceCandidates = async (
           originalFilename: true,
           type: true,
           status: true,
+          transaction: {
+            select: {
+              id: true,
+              type: true,
+              amount: true,
+              currency: true,
+              status: true,
+            },
+          },
         },
       },
       counterparty: {
@@ -256,6 +272,15 @@ const createInvoiceCandidate = async (
             originalFilename: true,
             type: true,
             status: true,
+            transaction: {
+              select: {
+                id: true,
+                type: true,
+                amount: true,
+                currency: true,
+                status: true,
+              },
+            },
           },
         },
         counterparty: {

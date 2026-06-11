@@ -81,3 +81,4 @@ This backlog should be reviewed after each formal loop run. Priorities may evolv
 - 2026-06-11: lightweight document review queue MVP completed in the entity workspace.
 - 2026-06-11: invoice candidate MVP completed so reviewed invoice documents can become structured draft invoice candidates.
 - 2026-06-11: invoice candidate review progression completed so draft candidates can be edited, validated, and moved into a ready-for-accounting-review state with audit logging.
+- 2026-06-11: manual accounting proposal MVP completed so ready invoice candidates can create a draft accounting transaction and draft journal entry through existing accounting rules.

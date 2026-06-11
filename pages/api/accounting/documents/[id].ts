@@ -9,6 +9,7 @@ import { prisma } from "../../../../lib/prisma";
 const ALLOWED_DOCUMENT_STATUSES = new Set([
   "UPLOADED",
   "PROCESSING",
+  "LINKED",
   "REVIEWED",
   "REJECTED",
   "FAILED",

@@ -30,6 +30,7 @@ const INVOICE_CANDIDATE_TYPES = new Set(["SUPPLIER", "CUSTOMER"]);
 const INVOICE_CANDIDATE_STATUSES = new Set([
   "DRAFT",
   "READY_FOR_ACCOUNTING_REVIEW",
+  "ACCOUNTING_DRAFT_CREATED",
 ]);
 
 const serializeInvoiceCandidate = <
@@ -163,6 +164,15 @@ export default withAuth(async (req: AuthenticatedNextApiRequest, res: NextApiRes
 
     if (!(await canManageDocuments(currentUser, candidate.entityId))) {
       jsonError(res, 403, "Forbidden");
+      return;
+    }
+
+    if (candidate.status === "ACCOUNTING_DRAFT_CREATED") {
+      jsonError(
+        res,
+        400,
+        "This invoice candidate already has a draft accounting transaction and can no longer be edited here"
+      );
       return;
     }
 
@@ -392,6 +402,15 @@ export default withAuth(async (req: AuthenticatedNextApiRequest, res: NextApiRes
               originalFilename: true,
               type: true,
               status: true,
+              transaction: {
+                select: {
+                  id: true,
+                  type: true,
+                  amount: true,
+                  currency: true,
+                  status: true,
+                },
+              },
             },
           },
           counterparty: {
@@ -432,6 +451,15 @@ export default withAuth(async (req: AuthenticatedNextApiRequest, res: NextApiRes
               originalFilename: true,
               type: true,
               status: true,
+              transaction: {
+                select: {
+                  id: true,
+                  type: true,
+                  amount: true,
+                  currency: true,
+                  status: true,
+                },
+              },
             },
           },
           counterparty: {

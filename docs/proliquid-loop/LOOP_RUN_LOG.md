@@ -6,6 +6,80 @@ This file records formal Proliquid loop runs used to review the operating model,
 
 ## Run Entries
 
+## Run 004
+
+### Run date
+
+2026-06-11
+
+### Run type
+
+Invoice Loop manual accounting proposal MVP increment.
+
+### Documents reviewed
+
+- `LOOP_RUNNER.md`
+- `LOOP_IMPLEMENTATION_ROADMAP.md`
+- `INVOICE_LOOP.md`
+- `ACCOUNTING_RULES.md`
+- `CURRENT_PRODUCT_STATE.md`
+- `BACKLOG.md`
+- `DECISIONS.md`
+
+### Main findings
+
+- The product already had the minimum building blocks for a controlled draft accounting handoff:
+  - reviewed source documents
+  - structured invoice candidates
+  - candidate readiness progression
+  - counterparties
+  - accounting rules
+  - draft transaction and journal entry generation
+- The highest-priority unfinished gap was the absence of a bridge between a ready invoice candidate and the existing accounting engine.
+- The smallest useful increment was not account suggestion logic or AI assistance. It was a controlled way to create a draft accounting transaction from a ready candidate while preserving auditability and review discipline.
+
+### Increment completed
+
+- Added a dedicated backend route to create a draft accounting transaction and draft journal entry from a `READY_FOR_ACCOUNTING_REVIEW` invoice candidate.
+- Reused the existing accounting rule engine by mapping invoice candidate type to:
+  - `SUPPLIER_INVOICE`
+  - `CUSTOMER_INVOICE`
+- Linked the source document to the created draft transaction.
+- Moved the source document into `LINKED` status after successful draft creation.
+- Moved the invoice candidate into `ACCOUNTING_DRAFT_CREATED` status after successful draft creation.
+- Added compact entity workspace actions so permitted internal users can create the draft directly from the invoice candidate row.
+
+### Control decisions reinforced
+
+- Only `READY_FOR_ACCOUNTING_REVIEW` candidates may create a draft accounting transaction.
+- The source document must remain `REVIEWED` until the draft is created.
+- The draft uses the existing accounting rule engine and remains `DRAFT`; no posting was introduced.
+- Once a draft accounting transaction exists, the invoice candidate becomes read-only in the candidate editor.
+- No OCR, AI extraction, VAT automation, reconciliation, or automatic posting was introduced.
+
+### Audit behavior
+
+- Added audit logging for:
+  - `INVOICE_CANDIDATE_ACCOUNTING_DRAFT_CREATED`
+  - `DOCUMENT_STATUS_CHANGED` to `LINKED`
+- Preserved the existing `BUSINESS_TRANSACTION_CREATED` audit event for the draft transaction itself.
+
+### Open questions
+
+- Should the next accounting-stage object remain the transaction/journal draft pair, or should Proliquid introduce a dedicated accounting proposal review record before posting workflows?
+- When the accounting draft is created, which additional fields should become mandatory for invoice candidates:
+  - invoice number
+  - VAT amount
+  - due date
+  - supporting classification note
+- What is the first minimum approval authority rule for moving from accounting draft to posted journal entry by entity profile?
+
+### Recommended next focus area
+
+Recommended next focus area: invoice candidate to accounting review traceability.
+
+The next smallest useful increment should expose the draft accounting output more clearly from the candidate itself, including the created draft transaction or journal reference and a tighter review path before posting, without adding AI or automated accounting judgment.
+
 ## Run 003
 
 ### Run date
