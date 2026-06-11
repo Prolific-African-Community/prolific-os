@@ -59,15 +59,6 @@ export default withAuth(async (req: AuthenticatedNextApiRequest, res: NextApiRes
                     version: true,
                   },
                 },
-                funds: {
-                  select: {
-                    id: true,
-                    name: true,
-                    currency: true,
-                  },
-                  orderBy: { createdAt: 'asc' },
-                  take: 1,
-                },
               },
             })
           ),
@@ -124,10 +115,7 @@ export default withAuth(async (req: AuthenticatedNextApiRequest, res: NextApiRes
     return res.status(200).json({
       success: true,
       data: {
-        entity: {
-          ...entity,
-          linkedLegacyFund: entity.funds[0] || null,
-        },
+        entity,
         summary: {
           projectsCount,
           counterpartiesCount,

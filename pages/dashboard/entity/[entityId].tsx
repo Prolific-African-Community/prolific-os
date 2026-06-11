@@ -40,11 +40,6 @@ interface EntityRecord {
   organization?: {
     name: string;
   } | null;
-  linkedLegacyFund?: {
-    id: string;
-    name: string;
-    currency: string;
-  } | null;
 }
 
 interface EntityDetailPayload {
