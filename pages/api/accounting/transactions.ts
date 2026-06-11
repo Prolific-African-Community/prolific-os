@@ -19,7 +19,6 @@ import { measureApi, measureStep } from '../../../lib/performance-log';
 
 interface CreateTransactionBody {
   entityId?: unknown;
-  fundId?: unknown;
   projectId?: unknown;
   counterpartyId?: unknown;
   type?: unknown;
@@ -77,7 +76,6 @@ const listTransactions = async (req: AuthenticatedNextApiRequest, res: NextApiRe
 const createTransaction = async (req: AuthenticatedNextApiRequest, res: NextApiResponse) => {
   const body = req.body as CreateTransactionBody;
   const entityId = getOptionalString(body.entityId);
-  const fundId = getOptionalString(body.fundId);
   const projectId = getOptionalString(body.projectId);
   const counterpartyId = getOptionalString(body.counterpartyId);
   const description = getOptionalString(body.description);
@@ -141,18 +139,10 @@ const createTransaction = async (req: AuthenticatedNextApiRequest, res: NextApiR
 
   const currency = getOptionalString(body.currency) || entity.baseCurrency || 'EUR';
 
-  const [fund, project, counterparty] = await measureApi(
+  const [project, counterparty] = await measureApi(
     'POST /api/accounting/transactions related lookups',
     () =>
       Promise.all([
-        fundId
-          ? measureStep('POST /api/accounting/transactions fund lookup', () =>
-              prisma.fund.findUnique({
-                where: { id: fundId },
-                select: { id: true, entityId: true },
-              })
-            )
-          : Promise.resolve(null),
         projectId
           ? measureStep('POST /api/accounting/transactions project lookup', () =>
               prisma.project.findUnique({
@@ -171,14 +161,6 @@ const createTransaction = async (req: AuthenticatedNextApiRequest, res: NextApiR
           : Promise.resolve(null),
       ])
   );
-
-  if (fundId && !fund) {
-    return jsonError(res, 404, 'Fund not found');
-  }
-
-  if (fund?.entityId && fund.entityId !== entityId) {
-    return jsonError(res, 400, 'Fund does not belong to the selected entity');
-  }
 
   if (projectId && !project) {
     return jsonError(res, 404, 'Project not found');
@@ -230,7 +212,6 @@ const createTransaction = async (req: AuthenticatedNextApiRequest, res: NextApiR
       tx.businessTransaction.create({
       data: {
         entityId,
-        fundId,
         projectId,
         counterpartyId,
         type: transactionType,

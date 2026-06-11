@@ -126,7 +126,6 @@ export default withAuth(
             role: getCompatibleClientUserRole(),
             platformRole: PlatformRole.NONE,
             mustChangePassword: true,
-            gpId: null,
           },
         });
 

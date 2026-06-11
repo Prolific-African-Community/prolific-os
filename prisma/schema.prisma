@@ -9,8 +9,7 @@ datasource db {
 
 enum UserRole {
   ADMIN
-  GP
-  LP
+  USER
 }
 
 enum PlatformRole {
@@ -147,8 +146,6 @@ model User {
   email                       String                @unique
   password                    String
   role                        UserRole
-  gpId                        String?
-  gp                          Gp?                   @relation(fields: [gpId], references: [id])
   mustChangePassword          Boolean               @default(false)
   platformRole                PlatformRole          @default(NONE)
   createdAt                   DateTime              @default(now())
@@ -159,17 +156,6 @@ model User {
   createdJournalEntries       JournalEntry[]        @relation("JournalEntryCreatedBy")
   uploadedDocuments           Document[]            @relation("DocumentUploadedBy")
   auditLogs                   AuditLog[]
-}
-
-model Gp {
-  id        String   @id @default(cuid())
-  name      String
-  rcsNumber String
-  address   String
-  createdAt DateTime @default(now())
-
-  users User[]
-  funds Fund[]
 }
 
 model Organization {
@@ -186,7 +172,6 @@ model Organization {
   updatedAt    DateTime           @updatedAt
   users        OrganizationUser[]
   entities     Entity[]
-  funds        Fund[]
   projects     Project[]
   auditLogs    AuditLog[]
 }
@@ -230,7 +215,6 @@ model Entity {
   createdAt               DateTime              @default(now())
   updatedAt               DateTime              @updatedAt
   users                   EntityUser[]
-  funds                   Fund[]
   projects                Project[]
   accounts                ChartOfAccount[]
   accountingPeriods       AccountingPeriod[]
@@ -309,52 +293,11 @@ model EntityUser {
   @@index([entityId, isActive])
 }
 
-model Fund {
-  id             String        @id @default(cuid())
-  name           String
-  currency       String
-  gpId           String
-  gp             Gp            @relation(fields: [gpId], references: [id])
-  organizationId String?
-  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
-  entityId       String?
-  entity         Entity?       @relation(fields: [entityId], references: [id], onDelete: SetNull)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  transactions         Transaction[]
-  projects             Project[]
-  businessTransactions BusinessTransaction[]
-
-  @@index([gpId])
-  @@index([entityId])
-  @@index([organizationId])
-  @@index([gpId, entityId])
-}
-
-model Transaction {
-  id     String          @id @default(cuid())
-  fundId String
-  amount Decimal         @db.Decimal(18, 2)
-  date   DateTime        @default(now())
-  type   TransactionType
-
-  fund Fund @relation(fields: [fundId], references: [id], onDelete: Cascade)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([fundId])
-}
-
 model Project {
   id             String        @id @default(cuid())
   name           String
   address        String?
   budget         Decimal?      @db.Decimal(18, 2)
-  fundId         String?
-  fund           Fund?         @relation(fields: [fundId], references: [id], onDelete: SetNull)
   organizationId String?
   organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
   entityId       String?
@@ -366,7 +309,6 @@ model Project {
   businessTransactions BusinessTransaction[]
   journalLines         JournalLine[]
 
-  @@index([fundId])
   @@index([entityId])
   @@index([organizationId])
   @@index([entityId, createdAt])
@@ -436,8 +378,6 @@ model BusinessTransaction {
   id             String            @id @default(cuid())
   entityId       String
   entity         Entity            @relation(fields: [entityId], references: [id], onDelete: Cascade)
-  fundId         String?
-  fund           Fund?             @relation(fields: [fundId], references: [id], onDelete: SetNull)
   projectId      String?
   project        Project?          @relation(fields: [projectId], references: [id], onDelete: SetNull)
   counterpartyId String?

@@ -239,7 +239,6 @@ export default withAuth(
             role: getCompatibleInternalUserRole(),
             platformRole: PlatformRole.NONE,
             mustChangePassword: true,
-            gpId: null,
           },
         });
 

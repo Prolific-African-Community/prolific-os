@@ -127,8 +127,6 @@ export default function LoginPage() {
 
       if (role === "ADMIN") {
         await router.push("/dashboard/admin");
-      } else if (role === "GP") {
-        await router.push("/dashboard");
       } else {
         await router.push("/dashboard");
       }

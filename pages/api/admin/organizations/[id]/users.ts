@@ -68,7 +68,7 @@ export default withAuth(
         data: memberships.map((membership) => ({
           id: membership.user.id,
           email: membership.user.email,
-          legacyRole: membership.user.role,
+          userRole: membership.user.role,
           platformRole: membership.user.platformRole,
           organizationUserId: membership.id,
           organizationRole: membership.role,

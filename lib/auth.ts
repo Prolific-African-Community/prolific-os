@@ -10,14 +10,12 @@ export interface AuthTokenPayload {
   sub: string;
   email?: string;
   role: UserRole;
-  gpId?: string | null;
 }
 
 export interface AuthenticatedUser {
   id: string;
   email?: string;
   role?: string;
-  gpId?: string | null;
   [key: string]: any;
 }
 
@@ -56,6 +54,8 @@ export const verifyAuthToken = (token: string): AuthTokenPayload => {
   return jwt.verify(token, getJwtSecret()) as AuthTokenPayload;
 };
 
+const DEFAULT_AUTH_ROLES = Object.values(UserRole) as UserRole[];
+
 const getBearerToken = (req: NextApiRequest): string | null => {
   const authHeader = req.headers.authorization;
 
@@ -68,7 +68,7 @@ const getBearerToken = (req: NextApiRequest): string | null => {
 
 export const withAuth = (
   handler: AuthenticatedNextApiHandler,
-  allowedRoles: UserRole[] = [UserRole.ADMIN, UserRole.GP, UserRole.LP]
+  allowedRoles: UserRole[] = DEFAULT_AUTH_ROLES
 ): NextApiHandler => {
   return async (req: NextApiRequest, res: NextApiResponse) => {
     const token = getBearerToken(req);

@@ -229,7 +229,7 @@ export default withAuth(
           data: {
             email: adminEmail,
             password,
-            role: UserRole.GP,
+            role: UserRole.USER,
             platformRole: PlatformRole.NONE,
             mustChangePassword: true,
           },

@@ -20,7 +20,7 @@ interface OrganizationRecord {
 interface AdminOrganizationUser {
   id: string;
   email: string;
-  legacyRole: string;
+  userRole: string;
   platformRole: string;
   organizationUserId: string;
   organizationRole: string;

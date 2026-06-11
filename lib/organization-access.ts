@@ -117,5 +117,5 @@ export const getOrganizationActiveAdminsCount = async (organizationId: string) =
   });
 };
 
-export const getCompatibleInternalUserRole = () => UserRole.GP;
-export const getCompatibleClientUserRole = () => UserRole.LP;
+export const getCompatibleInternalUserRole = () => UserRole.USER;
+export const getCompatibleClientUserRole = () => UserRole.USER;

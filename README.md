@@ -15,7 +15,7 @@ The active application centers on:
 - reporting
 - audit logging
 
-Legacy GP / fund compatibility code still exists in the repository, but it is no longer the primary product model.
+The active product model is organization-first and entity-first, including operational support for fund-type entities where needed.
 
 ## Environment
 

@@ -6,12 +6,6 @@ export type CurrentUserRecord = Prisma.UserGetPayload<{
     id: true;
     role: true;
     platformRole: true;
-    gpId: true;
-    gp: {
-      select: {
-        id: true;
-      };
-    };
     entityUsers: {
       select: {
         entityId: true;
@@ -44,12 +38,6 @@ export const getCurrentUserRecord = async (userId: string) => {
       id: true,
       role: true,
       platformRole: true,
-      gpId: true,
-      gp: {
-        select: {
-          id: true,
-        },
-      },
       entityUsers: {
         select: {
           entityId: true,
@@ -107,7 +95,7 @@ export const getAccessibleEntityIds = async (user: CurrentUserRecord) => {
     )
     .map((membership) => membership.organizationId);
 
-  if (!directEntityIds.length && !organizationIds.length && !user.gpId) {
+  if (!directEntityIds.length && !organizationIds.length) {
     return [];
   }
 
@@ -122,9 +110,6 @@ export const getAccessibleEntityIds = async (user: CurrentUserRecord) => {
         ...(directEntityIds.length ? [{ id: { in: directEntityIds } }] : []),
         ...(organizationIds.length
           ? [{ organizationId: { in: organizationIds } }]
-          : []),
-        ...(user.gpId
-          ? [{ funds: { some: { gpId: user.gpId } } }]
           : []),
       ],
     },
@@ -186,19 +171,7 @@ export const userCanAccessEntity = async (user: CurrentUserRecord, entityId: str
     return true;
   }
 
-  if (!user.gpId) {
-    return false;
-  }
-
-  const legacyFund = await prisma.fund.findFirst({
-    where: {
-      gpId: user.gpId,
-      entityId,
-    },
-    select: { id: true },
-  });
-
-  return Boolean(legacyFund);
+  return false;
 };
 
 export const ensureCompatibilityMemberships = async ({

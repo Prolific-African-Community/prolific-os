@@ -57,10 +57,9 @@ export default withAuth(async (req: AuthenticatedNextApiRequest, res: NextApiRes
 
     const entity = await prisma.entity.findUnique({
       where: { id: entityId },
-      include: {
-        funds: {
-          select: { id: true },
-        },
+      select: {
+        id: true,
+        organizationId: true,
       },
     });
 
@@ -69,22 +68,11 @@ export default withAuth(async (req: AuthenticatedNextApiRequest, res: NextApiRes
     }
 
     if (req.method === 'GET') {
-      const legacyFundIds = entity.funds.map((fund) => fund.id);
       const projects = await prisma.project.findMany({
-        where: {
-          OR: [
-            { entityId },
-            ...(legacyFundIds.length ? [{ fundId: { in: legacyFundIds } }] : []),
-          ],
-        },
+        where: { entityId },
         orderBy: { createdAt: 'desc' },
       });
-
-      const dedupedProjects = Array.from(
-        new Map(projects.map((project) => [project.id, project])).values()
-      );
-
-      return res.status(200).json({ success: true, data: dedupedProjects });
+      return res.status(200).json({ success: true, data: projects });
     }
 
     if (req.method !== 'POST') {
@@ -109,7 +97,6 @@ export default withAuth(async (req: AuthenticatedNextApiRequest, res: NextApiRes
         name,
         address,
         budget,
-        fundId: entity.funds[0]?.id,
         entityId: entity.id,
         organizationId: entity.organizationId,
       },

@@ -35,11 +35,6 @@ export default async function handler(
         role: true,
         platformRole: true,
         mustChangePassword: true,
-        gp: {
-          select: {
-            id: true,
-          },
-        },
       },
     })
     );
@@ -130,16 +125,12 @@ export default async function handler(
       }
     }
 
-    // 🔥 IMPORTANT : gpId réel via relation
-    const gpId = user.gp?.id ?? null;
-
     const token = await measureStep("POST /api/auth/login token sign", () =>
       Promise.resolve(
         jwt.sign(
           {
             sub: user.id,
             role: user.role,
-            gpId,
           },
           jwtSecret,
           { expiresIn: "1d" }
@@ -152,7 +143,6 @@ export default async function handler(
       token,
       role: user.role,
       mustChangePassword: user.mustChangePassword,
-      gpId,
     });
 
   } catch (error) {
