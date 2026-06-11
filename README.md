@@ -1,41 +1,40 @@
 # Proliquid
 
-## Authentication + Funds API
+Proliquid is an entity-first accounting and financial operations platform for multi-tenant organizations.
 
-This project now includes JWT authentication, role-based API access, and Prisma/PostgreSQL integration.
+## Current product scope
 
-### Roles
+The active application centers on:
 
-- `ADMIN`
-- `GP`
-- `LP`
+- organization administration
+- entity workspaces
+- role-based internal and client access
+- accounting setup and templates
+- business transactions and journal entries
+- document upload and secure private download
+- reporting
+- audit logging
 
-### Environment
+Legacy GP / fund compatibility code still exists in the repository, but it is no longer the primary product model.
 
-Copy `.env.example` to `.env.local` and update values:
-
-```bash
-cp .env.example .env.local
-```
+## Environment
 
 Required variables:
 
 - `DATABASE_URL`
 - `JWT_SECRET`
 
-### Prisma
+Additional environment variables may be required for optional services such as private document storage.
+
+## Prisma
 
 ```bash
 npm run prisma:generate
-npm run prisma:migrate -- --name init
+npm run prisma:migrate
 ```
 
-### API Endpoints
+## Build
 
-- `POST /api/auth/register`
-  - body: `{ "email": string, "password": string, "role"?: "ADMIN" | "GP" | "LP" }`
-- `POST /api/auth/login`
-  - body: `{ "email": string, "password": string }`
-- `GET /api/funds`
-  - requires `Authorization: Bearer <token>`
-  - allowed roles: `ADMIN`, `GP`
+```bash
+npm run build
+```
