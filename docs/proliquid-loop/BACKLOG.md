@@ -75,3 +75,9 @@ The backlog is intended to prioritize execution over theory. Items are framed as
 ## Notes
 
 This backlog should be reviewed after each formal loop run. Priorities may evolve, but the first goal is to make the core operating model real, controlled, and repeatable.
+
+### Recent completed increments
+
+- 2026-06-11: lightweight document review queue MVP completed in the entity workspace.
+- 2026-06-11: invoice candidate MVP completed so reviewed invoice documents can become structured draft invoice candidates.
+- 2026-06-11: invoice candidate review progression completed so draft candidates can be edited, validated, and moved into a ready-for-accounting-review state with audit logging.

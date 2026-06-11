@@ -223,6 +223,7 @@ model Entity {
   journalEntries          JournalEntry[]
   accountingRules         AccountingRule[]
   documents               Document[]
+  invoiceCandidates       InvoiceCandidate[]
   auditLogs               AuditLog[]
 
   @@index([organizationId])
@@ -356,19 +357,20 @@ model AccountingPeriod {
 }
 
 model Counterparty {
-  id           String                @id @default(cuid())
-  entityId     String
-  entity       Entity                @relation(fields: [entityId], references: [id], onDelete: Cascade)
-  name         String
-  type         CounterpartyType
-  email        String?
-  vatNumber    String?
-  country      String?
-  createdAt    DateTime              @default(now())
-  updatedAt    DateTime              @updatedAt
-  transactions BusinessTransaction[]
-  journalLines JournalLine[]
-  documents    Document[]
+  id                String                @id @default(cuid())
+  entityId          String
+  entity            Entity                @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  name              String
+  type              CounterpartyType
+  email             String?
+  vatNumber         String?
+  country           String?
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+  transactions      BusinessTransaction[]
+  journalLines      JournalLine[]
+  documents         Document[]
+  invoiceCandidates InvoiceCandidate[]
 
   @@index([entityId])
   @@index([entityId, name])
@@ -489,6 +491,7 @@ model Document {
   uploadedByUserId String?
   uploadedBy       User?                @relation("DocumentUploadedBy", fields: [uploadedByUserId], references: [id], onDelete: SetNull)
   status           String               @default("UPLOADED")
+  invoiceCandidate InvoiceCandidate?
   createdAt        DateTime             @default(now())
   updatedAt        DateTime             @updatedAt
 
@@ -499,6 +502,33 @@ model Document {
   @@index([counterpartyId])
   @@index([transactionId])
   @@index([uploadedByUserId])
+}
+
+model InvoiceCandidate {
+  id             String        @id @default(cuid())
+  entityId       String
+  entity         Entity        @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  documentId     String        @unique
+  document       Document      @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  counterpartyId String?
+  counterparty   Counterparty? @relation(fields: [counterpartyId], references: [id], onDelete: SetNull)
+  type           String
+  status         String        @default("DRAFT")
+  invoiceNumber  String?
+  invoiceDate    DateTime
+  dueDate        DateTime?
+  currency       String        @default("EUR")
+  subtotal       Decimal?      @db.Decimal(18, 2)
+  vatAmount      Decimal?      @db.Decimal(18, 2)
+  totalAmount    Decimal       @db.Decimal(18, 2)
+  description    String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([entityId])
+  @@index([entityId, status])
+  @@index([counterpartyId])
+  @@index([invoiceDate])
 }
 
 model AuditLog {

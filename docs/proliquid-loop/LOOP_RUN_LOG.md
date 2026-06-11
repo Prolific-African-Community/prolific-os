@@ -6,6 +6,127 @@ This file records formal Proliquid loop runs used to review the operating model,
 
 ## Run Entries
 
+## Run 003
+
+### Run date
+
+2026-06-11
+
+### Run type
+
+Invoice Loop validation progression increment.
+
+### Documents reviewed
+
+- `LOOP_RUNNER.md`
+- `LOOP_IMPLEMENTATION_ROADMAP.md`
+- `INVOICE_LOOP.md`
+- `ACCOUNTING_RULES.md`
+- `CURRENT_PRODUCT_STATE.md`
+- `BACKLOG.md`
+- `DECISIONS.md`
+
+### Main findings
+
+- The invoice candidate MVP already covered the first structured object in the invoice loop, but it stopped at candidate creation.
+- The highest-priority unfinished gap was the lack of a controlled progression step between `DRAFT` and accounting review.
+- A small but real workflow increment was possible without adding OCR, AI extraction, accounting proposals, or automatic posting.
+
+### Increment completed
+
+- Added controlled invoice candidate editing from the entity workspace.
+- Added server-side invoice candidate update support.
+- Added a validated candidate status progression from `DRAFT` to `READY_FOR_ACCOUNTING_REVIEW`.
+- Added the ability to reopen a ready candidate back to `DRAFT`.
+- Added audit logging for:
+  - invoice candidate content updates
+  - invoice candidate status changes
+
+### Control decisions reinforced
+
+- Invoice candidates may progress only when the source document remains `REVIEWED`.
+- Minimum readiness for accounting review now requires:
+  - counterparty
+  - invoice date
+  - currency
+  - total amount
+  - description
+- Ready candidates are treated as controlled review objects and must be reopened to `DRAFT` before accounting fields are edited again.
+- No OCR, AI extraction, reconciliation, automatic accounting proposal, or posting was introduced.
+
+### Open questions
+
+- Which approval role should be allowed to move a ready invoice candidate into a formal accounting proposal stage?
+- Should invoice number become mandatory before accounting proposal, or remain optional for limited supporting invoice formats?
+- What is the first minimum accounting proposal object: transaction draft, journal draft wrapper, or dedicated proposal record?
+
+### Recommended next focus area
+
+Recommended next focus area: manual accounting proposal MVP from ready invoice candidates.
+
+The next smallest useful increment should let a `READY_FOR_ACCOUNTING_REVIEW` candidate produce a controlled draft accounting proposal without posting automatically and without bypassing chart-of-accounts, period, or approval controls.
+
+## Run 002
+
+### Run date
+
+2026-06-11
+
+### Run type
+
+Invoice Loop MVP foundation increment.
+
+### Documents reviewed
+
+- `LOOP_RUNNER.md`
+- `LOOP_IMPLEMENTATION_ROADMAP.md`
+- `INVOICE_LOOP.md`
+- `ACCOUNTING_RULES.md`
+- `CURRENT_PRODUCT_STATE.md`
+- `BACKLOG.md`
+- `DECISIONS.md`
+
+### Main findings
+
+- The product already had the necessary prerequisites for the first invoice-loop object: reviewed document states, secure document storage, counterparties, permissions, audit logging, and entity-first workflow surfaces.
+- The highest-value missing step was not extraction or UI polish. It was the absence of a structured business object representing a reviewed invoice before accounting treatment.
+- A small manual invoice candidate layer is the safest next step because it creates workflow structure without pretending OCR, AI extraction, or automatic accounting already exist.
+
+### Increment completed
+
+- Added `InvoiceCandidate` as a structured entity-level workflow object linked to:
+  - reviewed invoice document
+  - entity
+  - optional counterparty
+- Added API support to:
+  - list invoice candidates for an entity
+  - create one invoice candidate from one reviewed invoice document
+- Added entity workspace support in the Documents tab to:
+  - start an invoice candidate from a reviewed invoice document
+  - capture core manual fields
+  - show created invoice candidates in a compact list
+
+### Control decisions reinforced
+
+- Reviewed documents only may enter the invoice candidate workflow.
+- Only invoice-type documents may become invoice candidates.
+- One document may create one invoice candidate only.
+- Candidate creation remains human-driven and manual.
+- No OCR, AI extraction, reconciliation, automatic accounting, or posting was introduced.
+
+### Open questions
+
+- What is the minimum candidate review status model after `DRAFT`?
+- Which fields should become mandatory before an invoice candidate may produce an accounting proposal?
+- Should counterparty be mandatory at candidate stage, or can unresolved counterparty mapping remain a controlled exception?
+- What is the first approval threshold for moving a candidate into accounting proposal status?
+
+### Recommended next focus area
+
+Recommended next focus area: invoice candidate review progression.
+
+The next smallest useful increment should let teams move invoice candidates from `DRAFT` into a controlled accounting-preparation state with explicit validation checks, without yet introducing OCR or automatic proposal logic.
+
 ## Run 001
 
 ### Run date

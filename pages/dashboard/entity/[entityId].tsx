@@ -328,6 +328,48 @@ interface DocumentForm {
   transactionId: string;
 }
 
+interface InvoiceCandidate {
+  id: string;
+  entityId: string;
+  documentId: string;
+  counterpartyId?: string | null;
+  type: string;
+  status: string;
+  invoiceNumber?: string | null;
+  invoiceDate: string;
+  dueDate?: string | null;
+  currency: string;
+  subtotal?: string | null;
+  vatAmount?: string | null;
+  totalAmount: string;
+  description?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  document?: {
+    id: string;
+    title?: string | null;
+    originalFilename?: string | null;
+    type: string;
+    status: string;
+  } | null;
+  counterparty?: Counterparty | null;
+}
+
+interface InvoiceCandidateForm {
+  documentId: string;
+  counterpartyId: string;
+  type: string;
+  status?: string;
+  invoiceNumber: string;
+  invoiceDate: string;
+  dueDate: string;
+  currency: string;
+  subtotal: string;
+  vatAmount: string;
+  totalAmount: string;
+  description: string;
+}
+
 interface ReportFilters {
   periodId: string;
   startDate: string;
@@ -403,6 +445,29 @@ const DOCUMENT_REVIEW_STATUSES = [
   "REJECTED",
   "FAILED",
 ];
+const REVIEW_QUEUE_GROUPS = [
+  {
+    id: "pending",
+    title: "Pending review",
+    description: "Newly uploaded or in-progress documents.",
+    statuses: ["UPLOADED", "PROCESSING"],
+    badgeClass: "bg-amber-50 text-amber-700",
+  },
+  {
+    id: "exceptions",
+    title: "Exceptions",
+    description: "Rejected or failed items needing follow-up.",
+    statuses: ["REJECTED", "FAILED"],
+    badgeClass: "bg-red-50 text-red-600",
+  },
+  {
+    id: "reviewed",
+    title: "Reviewed",
+    description: "Documents already cleared by operations.",
+    statuses: ["REVIEWED"],
+    badgeClass: "bg-emerald-50 text-emerald-700",
+  },
+] as const;
 const RULE_TRANSACTION_TYPES = [
   "CUSTOMER_INVOICE",
   "CUSTOMER_PAYMENT",
@@ -472,6 +537,23 @@ const initialDocumentForm = (): DocumentForm => ({
   title: "",
   counterpartyId: "",
   transactionId: "",
+});
+
+const initialInvoiceCandidateForm = (
+  currency = "EUR"
+): InvoiceCandidateForm => ({
+  documentId: "",
+  counterpartyId: "",
+  type: "SUPPLIER",
+  status: "DRAFT",
+  invoiceNumber: "",
+  invoiceDate: new Date().toISOString().slice(0, 10),
+  dueDate: "",
+  currency,
+  subtotal: "",
+  vatAmount: "",
+  totalAmount: "",
+  description: "",
 });
 
 const initialReportFilters = (): ReportFilters => ({
@@ -597,6 +679,81 @@ function documentDownloadUrl(document: AccountingDocument) {
   return document.downloadUrl || `/api/accounting/documents/${document.id}/download`;
 }
 
+function documentQueueActions(status: string) {
+  if (status === "UPLOADED") {
+    return [
+      { label: "Start", status: "PROCESSING" },
+      { label: "Review", status: "REVIEWED" },
+      { label: "Reject", status: "REJECTED" },
+    ];
+  }
+
+  if (status === "PROCESSING") {
+    return [
+      { label: "Review", status: "REVIEWED" },
+      { label: "Fail", status: "FAILED" },
+    ];
+  }
+
+  if (status === "REJECTED" || status === "FAILED") {
+    return [
+      { label: "Retry", status: "PROCESSING" },
+      { label: "Review", status: "REVIEWED" },
+    ];
+  }
+
+  if (status === "REVIEWED") {
+    return [{ label: "Reopen", status: "PROCESSING" }];
+  }
+
+  return [];
+}
+
+function isInvoiceDocumentType(type: string) {
+  return (
+    type === "INVOICE" ||
+    type === "SUPPLIER_INVOICE" ||
+    type === "CUSTOMER_INVOICE"
+  );
+}
+
+function invoiceCandidateTypeFromDocument(type: string) {
+  return type === "CUSTOMER_INVOICE" ? "CUSTOMER" : "SUPPLIER";
+}
+
+function invoiceCandidateStatusClass(status: string) {
+  if (status === "READY_FOR_ACCOUNTING_REVIEW") {
+    return "bg-blue-50 text-blue-700";
+  }
+
+  return "bg-amber-50 text-amber-700";
+}
+
+function invoiceCandidateStatusLabel(status: string) {
+  if (status === "READY_FOR_ACCOUNTING_REVIEW") {
+    return "Ready for accounting review";
+  }
+
+  return "Draft";
+}
+
+function invoiceCandidateFormFromCandidate(candidate: InvoiceCandidate): InvoiceCandidateForm {
+  return {
+    documentId: candidate.documentId,
+    counterpartyId: candidate.counterpartyId || "",
+    type: candidate.type,
+    status: candidate.status,
+    invoiceNumber: candidate.invoiceNumber || "",
+    invoiceDate: candidate.invoiceDate.slice(0, 10),
+    dueDate: candidate.dueDate ? candidate.dueDate.slice(0, 10) : "",
+    currency: candidate.currency,
+    subtotal: candidate.subtotal || "",
+    vatAmount: candidate.vatAmount || "",
+    totalAmount: candidate.totalAmount,
+    description: candidate.description || "",
+  };
+}
+
 function total(lines: JournalLine[], field: "debit" | "credit") {
   return lines.reduce((sum, line) => sum + Number(line[field] || 0), 0);
 }
@@ -676,6 +833,7 @@ export default function EntityWorkspacePage() {
   const [journalEntries, setJournalEntries] = useState<JournalEntry[]>([]);
   const [counterparties, setCounterparties] = useState<Counterparty[]>([]);
   const [documents, setDocuments] = useState<AccountingDocument[]>([]);
+  const [invoiceCandidates, setInvoiceCandidates] = useState<InvoiceCandidate[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [rules, setRules] = useState<AccountingRule[]>([]);
   const [templates, setTemplates] = useState<AccountingTemplate[]>([]);
@@ -700,6 +858,8 @@ export default function EntityWorkspacePage() {
   const [documentForm, setDocumentForm] = useState<DocumentForm>(
     initialDocumentForm
   );
+  const [invoiceCandidateForm, setInvoiceCandidateForm] =
+    useState<InvoiceCandidateForm>(initialInvoiceCandidateForm);
   const [accountForm, setAccountForm] = useState<AccountForm>(initialAccountForm);
   const [accountPreview, setAccountPreview] =
     useState<AccountClassificationPreview | null>(null);
@@ -722,8 +882,13 @@ export default function EntityWorkspacePage() {
   const [submittingProject, setSubmittingProject] = useState(false);
   const [addingCounterparty, setAddingCounterparty] = useState(false);
   const [addingDocument, setAddingDocument] = useState(false);
+  const [creatingInvoiceCandidate, setCreatingInvoiceCandidate] = useState(false);
   const [openingDocumentId, setOpeningDocumentId] = useState<string | null>(null);
   const [activeDocumentId, setActiveDocumentId] = useState<string | null>(null);
+  const [selectedInvoiceCandidateDocumentId, setSelectedInvoiceCandidateDocumentId] =
+    useState<string | null>(null);
+  const [selectedInvoiceCandidateId, setSelectedInvoiceCandidateId] =
+    useState<string | null>(null);
   const [documentFileInputKey, setDocumentFileInputKey] = useState(0);
   const [addingAccount, setAddingAccount] = useState(false);
   const [previewingAccount, setPreviewingAccount] = useState(false);
@@ -872,6 +1037,10 @@ export default function EntityWorkspacePage() {
         ...current,
         currency: entityData.entity.baseCurrency || current.currency,
       }));
+      setInvoiceCandidateForm((current) => ({
+        ...current,
+        currency: current.currency || entityData.entity.baseCurrency || "EUR",
+      }));
       markLoaded("entity");
     } catch (loadError) {
       setError(
@@ -926,6 +1095,15 @@ export default function EntityWorkspacePage() {
     );
     setDocuments(documentData);
     markLoaded("documents");
+  };
+
+  const loadInvoiceCandidates = async () => {
+    if (!entityId) return;
+    const candidateData = await request<InvoiceCandidate[]>(
+      `/api/accounting/invoice-candidates?entityId=${encodeURIComponent(entityId)}`
+    );
+    setInvoiceCandidates(candidateData);
+    markLoaded("invoiceCandidates");
   };
 
   const loadAccounts = async () => {
@@ -1025,6 +1203,9 @@ export default function EntityWorkspacePage() {
       } else if (tab === "documents") {
         const documentLoads: Promise<void>[] = [
           !force && loadedSections.documents ? Promise.resolve() : loadDocuments(),
+          !force && loadedSections.invoiceCandidates
+            ? Promise.resolve()
+            : loadInvoiceCandidates(),
         ];
 
         if (entityDetail.permissions.canManageDocuments) {
@@ -1137,17 +1318,42 @@ export default function EntityWorkspacePage() {
     [filteredRules, showAllRules]
   );
 
-  const documentReviewSummary = useMemo(
+  const documentReviewQueue = useMemo(
     () => ({
       pending: documents.filter((document) =>
         ["UPLOADED", "PROCESSING"].includes(document.status)
-      ).length,
-      reviewed: documents.filter((document) => document.status === "REVIEWED").length,
+      ),
+      reviewed: documents.filter((document) => document.status === "REVIEWED"),
       exceptions: documents.filter((document) =>
         ["REJECTED", "FAILED"].includes(document.status)
-      ).length,
+      ),
     }),
     [documents]
+  );
+
+  const documentReviewSummary = useMemo(
+    () => ({
+      pending: documentReviewQueue.pending.length,
+      reviewed: documentReviewQueue.reviewed.length,
+      exceptions: documentReviewQueue.exceptions.length,
+    }),
+    [documentReviewQueue]
+  );
+
+  const invoiceCandidateDocumentIds = useMemo(
+    () => new Set(invoiceCandidates.map((candidate) => candidate.documentId)),
+    [invoiceCandidates]
+  );
+
+  const reviewedInvoiceDocuments = useMemo(
+    () =>
+      documents.filter(
+        (document) =>
+          document.status === "REVIEWED" &&
+          isInvoiceDocumentType(document.type) &&
+          !invoiceCandidateDocumentIds.has(document.id)
+      ),
+    [documents, invoiceCandidateDocumentIds]
   );
 
   const trialBalanceRows = trialBalance?.accounts || [];
@@ -1567,6 +1773,178 @@ export default function EntityWorkspacePage() {
       );
     } finally {
       setActiveDocumentId(null);
+    }
+  };
+
+  const startInvoiceCandidate = (document: AccountingDocument) => {
+    const currency = entityDetail?.entity.baseCurrency || "EUR";
+    setSelectedInvoiceCandidateId(null);
+    setSelectedInvoiceCandidateDocumentId(document.id);
+    setInvoiceCandidateForm({
+      ...initialInvoiceCandidateForm(currency),
+      documentId: document.id,
+      counterpartyId: document.counterpartyId || "",
+      type: invoiceCandidateTypeFromDocument(document.type),
+      currency,
+      description: document.title || document.originalFilename || "",
+    });
+    setError(null);
+    setSuccess(null);
+  };
+
+  const resetInvoiceCandidateEditor = () => {
+    setSelectedInvoiceCandidateId(null);
+    setSelectedInvoiceCandidateDocumentId(null);
+    setInvoiceCandidateForm(
+      initialInvoiceCandidateForm(entityDetail?.entity.baseCurrency || "EUR")
+    );
+  };
+
+  const startInvoiceCandidateEdit = (candidate: InvoiceCandidate) => {
+    setSelectedInvoiceCandidateId(candidate.id);
+    setSelectedInvoiceCandidateDocumentId(candidate.documentId);
+    setInvoiceCandidateForm(invoiceCandidateFormFromCandidate(candidate));
+    setError(null);
+    setSuccess(null);
+  };
+
+  const submitInvoiceCandidate = async (
+    targetStatus: "DRAFT" | "READY_FOR_ACCOUNTING_REVIEW" = "DRAFT"
+  ) => {
+    if (!entityId) return;
+
+    setCreatingInvoiceCandidate(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const payload = {
+        entityId,
+        documentId: invoiceCandidateForm.documentId,
+        counterpartyId: invoiceCandidateForm.counterpartyId || undefined,
+        type: invoiceCandidateForm.type,
+        status: targetStatus,
+        invoiceNumber: invoiceCandidateForm.invoiceNumber || undefined,
+        invoiceDate: invoiceCandidateForm.invoiceDate,
+        dueDate: invoiceCandidateForm.dueDate || undefined,
+        currency: invoiceCandidateForm.currency,
+        subtotal: invoiceCandidateForm.subtotal || undefined,
+        vatAmount: invoiceCandidateForm.vatAmount || undefined,
+        totalAmount: invoiceCandidateForm.totalAmount,
+        description: invoiceCandidateForm.description || undefined,
+      };
+
+      if (selectedInvoiceCandidateId) {
+        const candidate = await request<InvoiceCandidate>(
+          `/api/accounting/invoice-candidates/${selectedInvoiceCandidateId}`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          }
+        );
+
+        setInvoiceCandidates((current) =>
+          current.map((item) => (item.id === candidate.id ? candidate : item))
+        );
+        startInvoiceCandidateEdit(candidate);
+        setSuccess(
+          targetStatus === "READY_FOR_ACCOUNTING_REVIEW"
+            ? "Invoice candidate is ready for accounting review."
+            : "Invoice candidate draft updated."
+        );
+      } else {
+        const candidate = await request<InvoiceCandidate>(
+          "/api/accounting/invoice-candidates",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          }
+        );
+
+        setInvoiceCandidates((current) => [candidate, ...current]);
+        if (targetStatus === "READY_FOR_ACCOUNTING_REVIEW") {
+          const promotedCandidate = await request<InvoiceCandidate>(
+            `/api/accounting/invoice-candidates/${candidate.id}`,
+            {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ status: targetStatus }),
+            }
+          );
+
+          setInvoiceCandidates((current) =>
+            current.map((item) =>
+              item.id === promotedCandidate.id ? promotedCandidate : item
+            )
+          );
+          resetInvoiceCandidateEditor();
+          setSuccess("Invoice candidate created and moved to accounting review.");
+        } else {
+          resetInvoiceCandidateEditor();
+          setSuccess("Invoice candidate created from reviewed document.");
+        }
+      }
+    } catch (candidateError) {
+      setError(
+        candidateError instanceof Error
+          ? candidateError.message
+          : selectedInvoiceCandidateId
+            ? "Unable to update invoice candidate"
+            : "Unable to create invoice candidate"
+      );
+    } finally {
+      setCreatingInvoiceCandidate(false);
+    }
+  };
+
+  const handleCreateInvoiceCandidate = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    await submitInvoiceCandidate("DRAFT");
+  };
+
+  const handleInvoiceCandidateStatus = async (
+    candidate: InvoiceCandidate,
+    status: "DRAFT" | "READY_FOR_ACCOUNTING_REVIEW"
+  ) => {
+    setCreatingInvoiceCandidate(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const updatedCandidate = await request<InvoiceCandidate>(
+        `/api/accounting/invoice-candidates/${candidate.id}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status }),
+        }
+      );
+
+      setInvoiceCandidates((current) =>
+        current.map((item) =>
+          item.id === updatedCandidate.id ? updatedCandidate : item
+        )
+      );
+
+      if (selectedInvoiceCandidateId === updatedCandidate.id) {
+        startInvoiceCandidateEdit(updatedCandidate);
+      }
+
+      setSuccess(
+        status === "READY_FOR_ACCOUNTING_REVIEW"
+          ? "Invoice candidate is ready for accounting review."
+          : "Invoice candidate reopened as draft."
+      );
+    } catch (candidateError) {
+      setError(
+        candidateError instanceof Error
+          ? candidateError.message
+          : "Unable to update invoice candidate"
+      );
+    } finally {
+      setCreatingInvoiceCandidate(false);
     }
   };
 
@@ -2250,6 +2628,333 @@ export default function EntityWorkspacePage() {
                 </div>
               </form>
             </div>
+            )}
+
+            {entityDetail.permissions.canManageDocuments && (
+              <div className={cn(CARD, "p-5")}>
+                <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-blue-500">
+                      Invoice loop
+                    </p>
+                    <h2 className="mt-2 text-xl font-semibold tracking-[-0.03em]">
+                      {selectedInvoiceCandidateId
+                        ? "Edit Invoice Candidate"
+                        : "Invoice Candidate"}
+                    </h2>
+                    <p className="mt-1 text-sm font-medium text-black/45">
+                      {selectedInvoiceCandidateId
+                        ? "Update the draft details, then move the candidate into accounting review once the minimum evidence is present."
+                        : "Turn a reviewed invoice document into a structured draft candidate for accounting review."}
+                    </p>
+                  </div>
+                  {(selectedInvoiceCandidateDocumentId || selectedInvoiceCandidateId) && (
+                    <button
+                      type="button"
+                      onClick={resetInvoiceCandidateEditor}
+                      className="rounded-full border border-black/10 px-4 py-2 text-xs font-semibold text-black/60 transition hover:border-black hover:text-black"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+
+                {!reviewedInvoiceDocuments.length &&
+                !selectedInvoiceCandidateDocumentId &&
+                !selectedInvoiceCandidateId ? (
+                  <p className="mt-5 text-sm font-medium text-black/45">
+                    No reviewed invoice documents are ready to become candidates yet.
+                  </p>
+                ) : (
+                  <>
+                    {!selectedInvoiceCandidateDocumentId &&
+                      !selectedInvoiceCandidateId &&
+                      reviewedInvoiceDocuments.length > 0 && (
+                      <div className="mt-5 flex flex-wrap gap-2">
+                        {reviewedInvoiceDocuments.map((document) => (
+                          <button
+                            key={document.id}
+                            type="button"
+                            onClick={() => startInvoiceCandidate(document)}
+                            className="rounded-full border border-black/10 bg-white px-4 py-2 text-xs font-semibold text-black/65 transition hover:border-blue-500 hover:text-blue-600"
+                          >
+                            {documentDisplayName(document)}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    {selectedInvoiceCandidateDocumentId && (
+                      <form
+                        onSubmit={handleCreateInvoiceCandidate}
+                        className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4"
+                      >
+                        <label className="xl:col-span-2">
+                          <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-black/50">
+                            Reviewed document
+                          </span>
+                          <select
+                            value={invoiceCandidateForm.documentId}
+                            disabled={Boolean(selectedInvoiceCandidateId)}
+                            onChange={(event) => {
+                              if (selectedInvoiceCandidateId) return;
+                              const selectedDocument = reviewedInvoiceDocuments.find(
+                                (document) => document.id === event.target.value
+                              );
+                              if (!selectedDocument) return;
+                              startInvoiceCandidate(selectedDocument);
+                            }}
+                            className={INPUT}
+                          >
+                            {reviewedInvoiceDocuments
+                              .concat(
+                                documents.filter(
+                                  (document) =>
+                                    document.id === selectedInvoiceCandidateDocumentId &&
+                                    isInvoiceDocumentType(document.type) &&
+                                    document.status === "REVIEWED"
+                                )
+                              )
+                              .filter(
+                                (document, index, current) =>
+                                  current.findIndex((item) => item.id === document.id) === index
+                              )
+                              .map((document) => (
+                                <option key={document.id} value={document.id}>
+                                  {documentDisplayName(document)}
+                                </option>
+                              ))}
+                          </select>
+                        </label>
+
+                        <label>
+                          <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-black/50">
+                            Candidate type
+                          </span>
+                          <select
+                            value={invoiceCandidateForm.type}
+                            onChange={(event) =>
+                              setInvoiceCandidateForm((current) => ({
+                                ...current,
+                                type: event.target.value,
+                              }))
+                            }
+                            className={INPUT}
+                          >
+                            <option value="SUPPLIER">SUPPLIER</option>
+                            <option value="CUSTOMER">CUSTOMER</option>
+                          </select>
+                        </label>
+
+                        {selectedInvoiceCandidateId && (
+                          <div className="flex items-end">
+                            <span
+                              className={cn(
+                                "rounded-full px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.12em]",
+                                invoiceCandidateStatusClass(
+                                  invoiceCandidateForm.status || "DRAFT"
+                                )
+                              )}
+                            >
+                              {invoiceCandidateStatusLabel(
+                                invoiceCandidateForm.status || "DRAFT"
+                              )}
+                            </span>
+                          </div>
+                        )}
+
+                        <label>
+                          <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-black/50">
+                            Counterparty
+                          </span>
+                          <select
+                            value={invoiceCandidateForm.counterpartyId}
+                            onChange={(event) =>
+                              setInvoiceCandidateForm((current) => ({
+                                ...current,
+                                counterpartyId: event.target.value,
+                              }))
+                            }
+                            className={INPUT}
+                          >
+                            <option value="">No counterparty selected</option>
+                            {counterparties.map((counterparty) => (
+                              <option key={counterparty.id} value={counterparty.id}>
+                                {counterparty.name} — {counterparty.type}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+
+                        <label>
+                          <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-black/50">
+                            Invoice number <span className="text-black/30">optional</span>
+                          </span>
+                          <input
+                            value={invoiceCandidateForm.invoiceNumber}
+                            onChange={(event) =>
+                              setInvoiceCandidateForm((current) => ({
+                                ...current,
+                                invoiceNumber: event.target.value,
+                              }))
+                            }
+                            placeholder="INV-2026-001"
+                            className={INPUT}
+                          />
+                        </label>
+
+                        <label>
+                          <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-black/50">
+                            Invoice date
+                          </span>
+                          <input
+                            type="date"
+                            value={invoiceCandidateForm.invoiceDate}
+                            onChange={(event) =>
+                              setInvoiceCandidateForm((current) => ({
+                                ...current,
+                                invoiceDate: event.target.value,
+                              }))
+                            }
+                            className={INPUT}
+                          />
+                        </label>
+
+                        <label>
+                          <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-black/50">
+                            Due date <span className="text-black/30">optional</span>
+                          </span>
+                          <input
+                            type="date"
+                            value={invoiceCandidateForm.dueDate}
+                            onChange={(event) =>
+                              setInvoiceCandidateForm((current) => ({
+                                ...current,
+                                dueDate: event.target.value,
+                              }))
+                            }
+                            className={INPUT}
+                          />
+                        </label>
+
+                        <label>
+                          <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-black/50">
+                            Currency
+                          </span>
+                          <input
+                            value={invoiceCandidateForm.currency}
+                            onChange={(event) =>
+                              setInvoiceCandidateForm((current) => ({
+                                ...current,
+                                currency: event.target.value.toUpperCase(),
+                              }))
+                            }
+                            className={INPUT}
+                          />
+                        </label>
+
+                        <label>
+                          <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-black/50">
+                            Subtotal <span className="text-black/30">optional</span>
+                          </span>
+                          <input
+                            value={invoiceCandidateForm.subtotal}
+                            onChange={(event) =>
+                              setInvoiceCandidateForm((current) => ({
+                                ...current,
+                                subtotal: event.target.value,
+                              }))
+                            }
+                            placeholder="1000.00"
+                            className={INPUT}
+                          />
+                        </label>
+
+                        <label>
+                          <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-black/50">
+                            VAT amount <span className="text-black/30">optional</span>
+                          </span>
+                          <input
+                            value={invoiceCandidateForm.vatAmount}
+                            onChange={(event) =>
+                              setInvoiceCandidateForm((current) => ({
+                                ...current,
+                                vatAmount: event.target.value,
+                              }))
+                            }
+                            placeholder="170.00"
+                            className={INPUT}
+                          />
+                        </label>
+
+                        <label>
+                          <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-black/50">
+                            Total amount
+                          </span>
+                          <input
+                            value={invoiceCandidateForm.totalAmount}
+                            onChange={(event) =>
+                              setInvoiceCandidateForm((current) => ({
+                                ...current,
+                                totalAmount: event.target.value,
+                              }))
+                            }
+                            placeholder="1170.00"
+                            className={INPUT}
+                          />
+                        </label>
+
+                        <label className="xl:col-span-4">
+                          <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-black/50">
+                            Description <span className="text-black/30">optional</span>
+                          </span>
+                          <input
+                            value={invoiceCandidateForm.description}
+                            onChange={(event) =>
+                              setInvoiceCandidateForm((current) => ({
+                                ...current,
+                                description: event.target.value,
+                              }))
+                            }
+                            placeholder="Administration fees Q2 2026"
+                            className={INPUT}
+                          />
+                        </label>
+
+                        <div className="xl:col-span-4 flex flex-wrap gap-3">
+                          <button
+                            type="submit"
+                            disabled={creatingInvoiceCandidate}
+                            className={BUTTON_BLUE}
+                          >
+                            {creatingInvoiceCandidate
+                              ? selectedInvoiceCandidateId
+                                ? "Saving..."
+                                : "Creating..."
+                              : selectedInvoiceCandidateId
+                                ? "Save draft"
+                                : "Create invoice candidate"}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={creatingInvoiceCandidate}
+                            onClick={() =>
+                              submitInvoiceCandidate("READY_FOR_ACCOUNTING_REVIEW")
+                            }
+                            className={BUTTON_DARK}
+                          >
+                            {creatingInvoiceCandidate
+                              ? "Saving..."
+                              : selectedInvoiceCandidateId
+                                ? "Save & mark ready"
+                                : "Create & mark ready"}
+                          </button>
+                        </div>
+                      </form>
+                    )}
+                  </>
+                )}
+              </div>
             )}
 
             <div className={cn(CARD, "overflow-hidden")}>
@@ -3035,6 +3740,267 @@ export default function EntityWorkspacePage() {
                     Exceptions {documentReviewSummary.exceptions}
                   </span>
                 </div>
+              </div>
+              <div className="border-b border-black/5 px-5 py-5">
+                <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-blue-500">
+                      Operational queue
+                    </p>
+                    <h3 className="mt-2 text-lg font-semibold tracking-[-0.03em] text-black">
+                      Review Queue
+                    </h3>
+                    <p className="mt-1 text-sm font-medium text-black/45">
+                      Documents grouped by review status for faster operational follow-up.
+                    </p>
+                  </div>
+                  {!entityDetail.permissions.canManageDocuments && (
+                    <p className="text-sm font-medium text-black/45">
+                      Read-only view. Status changes are limited to permitted internal users.
+                    </p>
+                  )}
+                </div>
+
+                <div className="mt-5 grid gap-4 xl:grid-cols-3">
+                  {REVIEW_QUEUE_GROUPS.map((group) => {
+                    const groupDocuments =
+                      group.id === "pending"
+                        ? documentReviewQueue.pending
+                        : group.id === "exceptions"
+                          ? documentReviewQueue.exceptions
+                          : documentReviewQueue.reviewed;
+
+                    return (
+                      <div key={group.id} className={cn(SUBCARD, "p-4")}>
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-semibold text-black/80">
+                              {group.title}
+                            </p>
+                            <p className="mt-1 text-xs font-medium leading-5 text-black/45">
+                              {group.description}
+                            </p>
+                          </div>
+                          <span
+                            className={cn(
+                              "rounded-full px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em]",
+                              group.badgeClass
+                            )}
+                          >
+                            {groupDocuments.length}
+                          </span>
+                        </div>
+
+                        {!groupDocuments.length ? (
+                          <p className="mt-5 text-sm font-medium text-black/40">
+                            No documents in this queue.
+                          </p>
+                        ) : (
+                          <div className="mt-4 space-y-3">
+                            {groupDocuments.map((document) => (
+                              <div
+                                key={document.id}
+                                className="rounded-[1rem] border border-black/8 bg-white px-4 py-3 shadow-[0_6px_20px_rgba(15,23,42,0.03)]"
+                              >
+                                <div className="flex flex-wrap items-start justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <p className="truncate text-sm font-semibold text-black/80">
+                                      {documentDisplayName(document)}
+                                    </p>
+                                    <div className="mt-1 flex flex-wrap items-center gap-2 text-xs font-medium text-black/45">
+                                      <span>{formatDate(document.createdAt)}</span>
+                                      <span className="text-black/20">•</span>
+                                      <span>{document.type}</span>
+                                      {document.counterparty?.name && (
+                                        <>
+                                          <span className="text-black/20">•</span>
+                                          <span>{document.counterparty.name}</span>
+                                        </>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <span
+                                    className={cn(
+                                      "rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em]",
+                                      documentStatusClass(document.status)
+                                    )}
+                                  >
+                                    {document.status}
+                                  </span>
+                                </div>
+
+                                <div className="mt-3 flex flex-wrap items-center gap-2">
+                                  <a
+                                    href={documentDownloadUrl(document)}
+                                    target="_blank"
+                                    rel="noreferrer noopener"
+                                    onClick={(event) => handleOpenDocument(event, document)}
+                                    className="rounded-full border border-black/10 px-3 py-2 text-[10px] font-semibold transition hover:border-black hover:bg-black hover:text-white"
+                                  >
+                                    {openingDocumentId === document.id ? "Opening..." : "Open"}
+                                  </a>
+
+                                  {entityDetail.permissions.canManageDocuments &&
+                                    documentQueueActions(document.status).map((action) => (
+                                      <button
+                                        key={`${document.id}-${action.status}`}
+                                        type="button"
+                                        disabled={activeDocumentId === document.id}
+                                        onClick={() =>
+                                          handleDocumentStatus(document, action.status)
+                                        }
+                                        className="rounded-full border border-black/10 bg-white px-3 py-2 text-[10px] font-semibold text-black/65 transition hover:border-blue-500 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-50"
+                                      >
+                                        {activeDocumentId === document.id
+                                          ? "Updating..."
+                                          : action.label}
+                                      </button>
+                                    ))}
+                                  {entityDetail.permissions.canManageDocuments &&
+                                    document.status === "REVIEWED" &&
+                                    isInvoiceDocumentType(document.type) &&
+                                    !invoiceCandidateDocumentIds.has(document.id) && (
+                                      <button
+                                        type="button"
+                                        onClick={() => startInvoiceCandidate(document)}
+                                        className="rounded-full border border-blue-500/20 bg-blue-50 px-3 py-2 text-[10px] font-semibold text-blue-700 transition hover:border-blue-500 hover:bg-blue-500 hover:text-white"
+                                      >
+                                        Create candidate
+                                      </button>
+                                    )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="border-b border-black/5 px-5 py-5">
+                <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-blue-500">
+                      Invoice loop
+                    </p>
+                    <h3 className="mt-2 text-lg font-semibold tracking-[-0.03em] text-black">
+                      Invoice Candidates
+                    </h3>
+                    <p className="mt-1 text-sm font-medium text-black/45">
+                      Structured draft invoices created from reviewed documents.
+                    </p>
+                  </div>
+                  <span className="rounded-full bg-slate-100 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+                    {invoiceCandidates.length} total
+                  </span>
+                </div>
+
+                {!invoiceCandidates.length ? (
+                  <p className="mt-5 text-sm font-medium text-black/45">
+                    No invoice candidates yet.
+                  </p>
+                ) : (
+                  <div className="mt-5 overflow-x-auto">
+                    <table className="min-w-full text-left text-sm">
+                      <thead className="bg-[#f7f7f9] text-[11px] font-semibold uppercase tracking-[0.14em] text-black/40">
+                        <tr>
+                          <th className="px-4 py-3">Invoice date</th>
+                          <th className="px-4 py-3">Document</th>
+                          <th className="px-4 py-3">Type</th>
+                          <th className="px-4 py-3">Counterparty</th>
+                          <th className="px-4 py-3">Number</th>
+                          <th className="px-4 py-3">Status</th>
+                          <th className="px-4 py-3 text-right">Total</th>
+                          {entityDetail.permissions.canManageDocuments && (
+                            <th className="px-5 py-3 text-right">Action</th>
+                          )}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-black/5">
+                        {invoiceCandidates.map((candidate) => (
+                          <tr key={candidate.id} className="transition hover:bg-black/[0.02]">
+                            <td className="px-4 py-4 font-medium text-black/60">
+                              {formatDate(candidate.invoiceDate)}
+                            </td>
+                            <td className="px-4 py-4 font-semibold text-black/80">
+                              {candidate.document
+                                ? candidate.document.title ||
+                                  candidate.document.originalFilename ||
+                                  "Reviewed document"
+                                : "Reviewed document"}
+                            </td>
+                            <td className="px-4 py-4 font-semibold text-black/80">
+                              {candidate.type}
+                            </td>
+                            <td className="px-4 py-4 font-medium text-black/60">
+                              {candidate.counterparty?.name || "—"}
+                            </td>
+                            <td className="px-4 py-4 font-medium text-black/60">
+                              {candidate.invoiceNumber || "—"}
+                            </td>
+                            <td className="px-4 py-4">
+                              <span
+                                className={cn(
+                                  "rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em]",
+                                  invoiceCandidateStatusClass(candidate.status)
+                                )}
+                              >
+                                {invoiceCandidateStatusLabel(candidate.status)}
+                              </span>
+                            </td>
+                            <td className="px-4 py-4 text-right font-semibold text-black/80">
+                              {formatAmount(candidate.totalAmount, candidate.currency)}
+                            </td>
+                            {entityDetail.permissions.canManageDocuments && (
+                              <td className="px-5 py-4">
+                                <div className="flex flex-wrap items-center justify-end gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => startInvoiceCandidateEdit(candidate)}
+                                    className="rounded-full border border-black/10 px-3 py-2 text-[10px] font-semibold text-black/65 transition hover:border-black hover:text-black"
+                                  >
+                                    Edit
+                                  </button>
+                                  {candidate.status === "DRAFT" ? (
+                                    <button
+                                      type="button"
+                                      disabled={creatingInvoiceCandidate}
+                                      onClick={() =>
+                                        handleInvoiceCandidateStatus(
+                                          candidate,
+                                          "READY_FOR_ACCOUNTING_REVIEW"
+                                        )
+                                      }
+                                      className="rounded-full border border-blue-500/20 bg-blue-50 px-3 py-2 text-[10px] font-semibold text-blue-700 transition hover:border-blue-500 hover:bg-blue-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                      {creatingInvoiceCandidate
+                                        ? "Updating..."
+                                        : "Mark ready"}
+                                    </button>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      disabled={creatingInvoiceCandidate}
+                                      onClick={() =>
+                                        handleInvoiceCandidateStatus(candidate, "DRAFT")
+                                      }
+                                      className="rounded-full border border-black/10 bg-white px-3 py-2 text-[10px] font-semibold text-black/65 transition hover:border-black hover:text-black disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                      {creatingInvoiceCandidate
+                                        ? "Updating..."
+                                        : "Reopen"}
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                            )}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
               {!documents.length ? (
                 <p className="px-5 py-10 text-sm font-medium text-black/45">
