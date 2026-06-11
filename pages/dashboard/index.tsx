@@ -137,7 +137,6 @@ export default function WorkspaceDashboard() {
   const [entities, setEntities] = useState<EntityListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [syncing, setSyncing] = useState(false);
   const [canManageUsers, setCanManageUsers] = useState(false);
   const [canCreateEntities, setCanCreateEntities] = useState(false);
   const [showCreateEntity, setShowCreateEntity] = useState(false);
@@ -275,36 +274,6 @@ export default function WorkspaceDashboard() {
     [entities]
   );
 
-  const handleSyncLegacyFunds = async () => {
-    setSyncing(true);
-    setError(null);
-    setSuccess(null);
-
-    try {
-      const data = await request<{
-        migratedCount: number;
-        skippedCount: number;
-      }>("/api/entities/ensure-from-legacy-funds", {
-        method: "POST",
-      });
-
-      setSuccess(
-        `Legacy sync completed. Migrated ${data.migratedCount} fund${
-          data.migratedCount === 1 ? "" : "s"
-        }, skipped ${data.skippedCount}.`
-      );
-      await loadEntities(true);
-    } catch (syncError) {
-      setError(
-        syncError instanceof Error
-          ? syncError.message
-          : "Unable to sync legacy funds"
-      );
-    } finally {
-      setSyncing(false);
-    }
-  };
-
   const handleLogout = () => {
     localStorage.clear();
     router.replace("/login");
@@ -413,14 +382,6 @@ export default function WorkspaceDashboard() {
                 className={BUTTON_DARK}
               >
                 {refreshing ? "Refreshing..." : "Refresh"}
-              </button>
-              <button
-                type="button"
-                onClick={handleSyncLegacyFunds}
-                disabled={syncing}
-                className={BUTTON_BLUE}
-              >
-                {syncing ? "Syncing..." : "Sync legacy funds"}
               </button>
             </div>
           </div>
@@ -641,8 +602,8 @@ export default function WorkspaceDashboard() {
             <div className="px-6 py-14 text-center">
               <p className="text-base font-semibold">No entities available yet.</p>
               <p className="mt-2 text-sm font-medium text-black/50">
-                Use legacy fund sync to bootstrap entities from existing fund
-                records if needed.
+                Create the first entity workspace to begin accounting,
+                projects, and reporting.
               </p>
               <div className="mt-5 flex flex-wrap justify-center gap-3">
                 {canCreateEntities && (
@@ -654,14 +615,6 @@ export default function WorkspaceDashboard() {
                     Create first entity
                   </button>
                 )}
-                <button
-                  type="button"
-                  onClick={handleSyncLegacyFunds}
-                  disabled={syncing}
-                  className={BUTTON_DARK}
-                >
-                  {syncing ? "Syncing..." : "Sync legacy funds"}
-                </button>
               </div>
             </div>
           ) : (
