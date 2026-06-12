@@ -6,6 +6,58 @@ This file records formal Proliquid loop runs used to review the operating model,
 
 ## Run Entries
 
+## Run 006
+
+### Run date
+
+2026-06-12
+
+### Run type
+
+Invoice accounting review handoff increment.
+
+### Documents reviewed
+
+- `LOOP_RUNNER.md`
+- `BACKLOG.md`
+- `LOOP_RUN_LOG.md`
+- `INVOICE_LOOP.md`
+- `ACCOUNTING_RULES.md`
+- `LOOP_IMPLEMENTATION_ROADMAP.md`
+
+### Main findings
+
+- The invoice workflow could already create a draft accounting transaction and expose that draft from the candidate.
+- The remaining business gap was the lack of a direct path into the linked draft journal entry, where the reviewer actually checks the accounting lines.
+- The next useful increment was therefore not another workflow state. It was a journal-review handoff that lets the user move from invoice candidate to accounting lines in one step.
+
+### Increment completed
+
+- Extended the journal entries API so entries can be filtered by linked `transactionId`.
+- Exposed `transactionId` in the journal entry payload returned to the entity workspace.
+- Added an `Open journal` action for invoice candidates whose accounting draft already exists.
+- Added journal focus behavior so the linked draft journal entry is loaded, highlighted, and scrolled into view in the Journal tab.
+- Added a focused-draft indicator in the Journal section to make review orientation clearer.
+
+### Control decisions reinforced
+
+- No new autonomous accounting behavior was introduced.
+- No posting logic or posting permissions were changed.
+- The increment improves human review of draft accounting output rather than adding more workflow states.
+- Review remains anchored in the existing journal-entry control surface and audit model.
+
+### Open questions
+
+- What is the smallest useful increment from draft journal review to posting readiness for invoice-originated accounting drafts?
+- Should the invoice workflow expose rule rationale or account mapping context directly alongside the draft journal lines?
+- Is a lightweight approval note or reviewer acknowledgment needed before posting, or are existing posting controls sufficient for the next increment?
+
+### Recommended next focus area
+
+Recommended next focus area: invoice accounting review completion.
+
+The next smallest useful increment should make the reviewer’s decision path clearer once the draft journal entry is open, ideally by exposing the accounting rationale or posting-readiness cues from the invoice-originated draft without adding AI, OCR, or unnecessary workflow states.
+
 ## Run 005
 
 ### Run date

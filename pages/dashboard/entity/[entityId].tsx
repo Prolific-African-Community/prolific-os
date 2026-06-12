@@ -178,6 +178,7 @@ interface JournalLine {
 interface JournalEntry {
   id: string;
   entityId?: string;
+  transactionId?: string | null;
   date: string;
   description: string;
   status: "DRAFT" | "POSTED" | "REVERSED";
@@ -904,6 +905,7 @@ export default function EntityWorkspacePage() {
   const [activeInvoiceCandidateId, setActiveInvoiceCandidateId] =
     useState<string | null>(null);
   const [focusedTransactionId, setFocusedTransactionId] = useState<string | null>(null);
+  const [focusedJournalEntryId, setFocusedJournalEntryId] = useState<string | null>(null);
   const [openingDocumentId, setOpeningDocumentId] = useState<string | null>(null);
   const [activeDocumentId, setActiveDocumentId] = useState<string | null>(null);
   const [selectedInvoiceCandidateDocumentId, setSelectedInvoiceCandidateDocumentId] =
@@ -939,6 +941,19 @@ export default function EntityWorkspacePage() {
 
     return () => window.clearTimeout(timeout);
   }, [activeTab, focusedTransactionId, transactions]);
+
+  useEffect(() => {
+    if (activeTab !== "journal" || !focusedJournalEntryId) {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      const row = window.document.getElementById(`journal-entry-${focusedJournalEntryId}`);
+      row?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 150);
+
+    return () => window.clearTimeout(timeout);
+  }, [activeTab, focusedJournalEntryId, journalEntries]);
 
   const request = async <T,>(url: string, options: RequestInit = {}) => {
     const token = localStorage.getItem("token");
@@ -1111,6 +1126,21 @@ export default function EntityWorkspacePage() {
     );
     setJournalEntries(journalEntryData);
     markLoaded("journalEntries");
+    return journalEntryData;
+  };
+
+  const mergeJournalEntry = (entry: JournalEntry) => {
+    setJournalEntries((current) => {
+      const existing = current.find((item) => item.id === entry.id);
+
+      if (existing) {
+        return current.map((item) =>
+          item.id === entry.id ? { ...existing, ...entry } : item
+        );
+      }
+
+      return [entry, ...current].slice(0, 50);
+    });
   };
 
   const loadCounterparties = async () => {
@@ -1997,8 +2027,50 @@ export default function EntityWorkspacePage() {
       return [transaction, ...current].slice(0, 50);
     });
     setFocusedTransactionId(transaction.id);
+    setFocusedJournalEntryId(null);
     setSuccess("Draft accounting transaction opened in the Accounting tab.");
     selectTab("accounting");
+  };
+
+  const openDraftJournalEntry = async (candidate: InvoiceCandidate) => {
+    if (!entityId || !candidate.document?.transaction?.id) return;
+
+    setCreatingInvoiceCandidate(true);
+    setActiveInvoiceCandidateId(candidate.id);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const journalData = await request<JournalEntry[]>(
+        `/api/accounting/journal-entries?entityId=${encodeURIComponent(
+          entityId
+        )}&transactionId=${encodeURIComponent(candidate.document.transaction.id)}&limit=10`
+      );
+
+      const entry = journalData.find(
+        (item) => item.transactionId === candidate.document?.transaction?.id
+      );
+
+      if (!entry) {
+        throw new Error("No linked draft journal entry was found for this invoice candidate.");
+      }
+
+      mergeJournalEntry(entry);
+      markLoaded("journalEntries");
+      setFocusedJournalEntryId(entry.id);
+      setFocusedTransactionId(null);
+      setSuccess("Draft journal entry opened in the Journal tab.");
+      selectTab("journal");
+    } catch (journalError) {
+      setError(
+        journalError instanceof Error
+          ? journalError.message
+          : "Unable to open linked draft journal entry"
+      );
+    } finally {
+      setCreatingInvoiceCandidate(false);
+      setActiveInvoiceCandidateId(null);
+    }
   };
 
   const handleCreateInvoiceCandidateAccountingDraft = async (
@@ -2039,6 +2111,7 @@ export default function EntityWorkspacePage() {
 
         return [payload.transaction, ...current].slice(0, 50);
       });
+      mergeJournalEntry(payload.journalEntry);
       setDocuments((current) =>
         current.map((item) =>
           item.id === payload.candidate.documentId
@@ -2058,6 +2131,7 @@ export default function EntityWorkspacePage() {
       await loadEntityDetail();
 
       setFocusedTransactionId(payload.transaction.id);
+      setFocusedJournalEntryId(null);
       setSuccess("Draft accounting transaction created from invoice candidate.");
       selectTab("accounting");
     } catch (candidateError) {
@@ -3407,22 +3481,29 @@ export default function EntityWorkspacePage() {
                   Journal entries
                 </h2>
               </div>
-              <button
-                type="button"
-                disabled={refreshing}
-                onClick={async () => {
-                  resetLoaded("journalEntries");
-                  setRefreshing(true);
-                  try {
-                    await loadJournalEntries();
-                  } finally {
-                    setRefreshing(false);
-                  }
-                }}
-                className={BUTTON_DARK}
-              >
-                {refreshing ? "Refreshing..." : "Refresh"}
-              </button>
+              <div className="flex flex-wrap items-center gap-3">
+                {focusedJournalEntryId && (
+                  <span className="rounded-full bg-blue-50 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-blue-700">
+                    Focused draft journal
+                  </span>
+                )}
+                <button
+                  type="button"
+                  disabled={refreshing}
+                  onClick={async () => {
+                    resetLoaded("journalEntries");
+                    setRefreshing(true);
+                    try {
+                      await loadJournalEntries();
+                    } finally {
+                      setRefreshing(false);
+                    }
+                  }}
+                  className={BUTTON_DARK}
+                >
+                  {refreshing ? "Refreshing..." : "Refresh"}
+                </button>
+              </div>
             </div>
 
             {!journalEntries.length ? (
@@ -3451,7 +3532,14 @@ export default function EntityWorkspacePage() {
 
                       return (
                         <Fragment key={entry.id}>
-                          <tr className="transition hover:bg-[#fafafd]">
+                          <tr
+                            id={`journal-entry-${entry.id}`}
+                            className={cn(
+                              "transition hover:bg-[#fafafd]",
+                              focusedJournalEntryId === entry.id &&
+                                "bg-blue-50/60 ring-1 ring-inset ring-blue-500/20"
+                            )}
+                          >
                             <td className="px-5 py-4 font-medium text-black/60">
                               {formatDate(entry.date)}
                             </td>
@@ -4170,6 +4258,20 @@ export default function EntityWorkspacePage() {
                                         className="rounded-full border border-emerald-500/20 bg-emerald-50 px-3 py-2 text-[10px] font-semibold text-emerald-700 transition hover:border-emerald-500 hover:bg-emerald-500 hover:text-white"
                                       >
                                         Open draft
+                                      </button>
+                                      <button
+                                        type="button"
+                                        disabled={
+                                          creatingInvoiceCandidate ||
+                                          !candidate.document?.transaction?.id
+                                        }
+                                        onClick={() => openDraftJournalEntry(candidate)}
+                                        className="rounded-full border border-blue-500/20 bg-blue-50 px-3 py-2 text-[10px] font-semibold text-blue-700 transition hover:border-blue-500 hover:bg-blue-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                                      >
+                                        {creatingInvoiceCandidate &&
+                                        activeInvoiceCandidateId === candidate.id
+                                          ? "Opening..."
+                                          : "Open journal"}
                                       </button>
                                       <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-emerald-700">
                                         Draft created

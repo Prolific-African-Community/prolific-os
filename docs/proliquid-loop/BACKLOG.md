@@ -78,6 +78,7 @@ This backlog should be reviewed after each formal loop run. Priorities may evolv
 
 ### Recent completed increments
 
+- 2026-06-12: invoice journal review handoff completed so users can open the linked draft journal entry directly from the invoice workflow and review accounting lines in context.
 - 2026-06-11: lightweight document review queue MVP completed in the entity workspace.
 - 2026-06-11: invoice candidate MVP completed so reviewed invoice documents can become structured draft invoice candidates.
 - 2026-06-11: invoice candidate review progression completed so draft candidates can be edited, validated, and moved into a ready-for-accounting-review state with audit logging.

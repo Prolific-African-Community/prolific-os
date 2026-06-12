@@ -13,6 +13,7 @@ export default withAuth(async (req: AuthenticatedNextApiRequest, res: NextApiRes
   }
 
   const entityId = getQueryString(req.query.entityId);
+  const transactionId = getQueryString(req.query.transactionId);
   const rawLimit = Number(getQueryString(req.query.limit) || 50);
   const rawOffset = Number(getQueryString(req.query.offset) || 0);
   const limit = Number.isInteger(rawLimit) ? Math.min(Math.max(rawLimit, 1), 100) : 50;
@@ -34,12 +35,16 @@ export default withAuth(async (req: AuthenticatedNextApiRequest, res: NextApiRes
 
     const journalEntries = await measureStep('GET /api/accounting/journal-entries list', () =>
       prisma.journalEntry.findMany({
-      where: { entityId },
+      where: {
+        entityId,
+        ...(transactionId ? { transactionId } : {}),
+      },
       orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
       take: limit,
       skip: offset,
       select: {
         id: true,
+        transactionId: true,
         date: true,
         description: true,
         status: true,
