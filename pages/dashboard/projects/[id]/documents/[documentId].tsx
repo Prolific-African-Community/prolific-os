@@ -116,8 +116,12 @@ export default function DocumentDetailPage() {
   const [runsLoading, setRunsLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [creatingRun, setCreatingRun] = useState(false);
+  const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [runsError, setRunsError] = useState<string | null>(null);
+  const [generationSuccess, setGenerationSuccess] = useState<string | null>(
+    null
+  );
 
   const request = async <T,>(url: string, options: RequestInit = {}) => {
     const token = localStorage.getItem("token");
@@ -280,6 +284,45 @@ export default function DocumentDetailPage() {
     }
   };
 
+  const handleGenerate = async () => {
+    if (!projectId || !documentId) return;
+
+    setGenerating(true);
+    setRunsError(null);
+    setGenerationSuccess(null);
+
+    try {
+      const result = await request<{
+        document: DocumentDetail;
+        generationRun: GenerationRun;
+      }>(`/api/projects/${projectId}/documents/${documentId}/generate`, {
+        method: "POST",
+      });
+      const updatedDocument = result.document;
+      setDocument(updatedDocument);
+      setForm({
+        title: updatedDocument.title,
+        type: updatedDocument.type,
+        objective: updatedDocument.objective,
+        instructions: updatedDocument.instructions || "",
+        outline: updatedDocument.outline || "",
+        content: updatedDocument.content || "",
+        templateId: updatedDocument.templateId || "",
+      });
+      setGenerationSuccess("Generated Markdown has been saved into the document content.");
+      await loadRuns();
+    } catch (generateError) {
+      setRunsError(
+        generateError instanceof Error
+          ? generateError.message
+          : "Unable to generate document"
+      );
+      await loadRuns();
+    } finally {
+      setGenerating(false);
+    }
+  };
+
   return (
     <AppShell
       eyebrow="Document"
@@ -350,14 +393,26 @@ export default function DocumentDetailPage() {
               <button
                 type="button"
                 onClick={handleCreateRun}
-                disabled={creatingRun}
+                disabled={creatingRun || generating}
+                className={BUTTON_SUBTLE}
+              >
+                {creatingRun ? "Preparing..." : "Prepare context"}
+              </button>
+              <button
+                type="button"
+                onClick={handleGenerate}
+                disabled={generating || creatingRun}
                 className={BUTTON_BLUE}
               >
-                {creatingRun
-                  ? "Preparing..."
-                  : "Prepare generation context"}
+                {generating ? "Generating..." : "Generate document"}
               </button>
             </div>
+
+            {generationSuccess && (
+              <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm font-bold text-emerald-700">
+                {generationSuccess}
+              </div>
+            )}
 
             {runsError && (
               <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm font-bold text-red-700">
@@ -410,6 +465,23 @@ export default function DocumentDetailPage() {
                       <pre className="mt-4 max-h-[420px] overflow-auto whitespace-pre-wrap rounded-2xl bg-white p-4 text-xs font-medium leading-6 text-black/70">
                         {run.inputSummary || "No input summary saved."}
                       </pre>
+                      {run.output && (
+                        <div className="mt-4">
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-black/45">
+                            Output preview
+                          </p>
+                          <pre className="mt-2 max-h-[260px] overflow-auto whitespace-pre-wrap rounded-2xl bg-white p-4 text-xs font-medium leading-6 text-black/70">
+                            {run.output.length > 3000
+                              ? `${run.output.slice(0, 3000)}...`
+                              : run.output}
+                          </pre>
+                        </div>
+                      )}
+                      {run.error && (
+                        <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm font-bold text-red-700">
+                          {run.error}
+                        </div>
+                      )}
                     </article>
                   ))}
                 </div>

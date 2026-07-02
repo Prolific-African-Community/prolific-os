@@ -10,8 +10,8 @@
     "prisma:deploy": "prisma migrate deploy"
   },
   "prisma": {
-  "seed": "ts-node --compiler-options {\"module\":\"CommonJS\",\"types\":[\"node\"]} prisma/seed.ts"
-},
+    "seed": "ts-node --compiler-options {\"module\":\"CommonJS\",\"types\":[\"node\"]} prisma/seed.ts"
+  },
   "engines": {
     "node": "20.x"
   },
@@ -25,6 +25,7 @@
     "formidable": "^3.5.4",
     "jsonwebtoken": "^9.0.2",
     "next": "latest",
+    "openai": "^6.45.0",
     "prisma": "^5.22.0",
     "react": "latest",
     "react-dom": "latest"
