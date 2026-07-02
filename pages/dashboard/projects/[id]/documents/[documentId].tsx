@@ -117,8 +117,10 @@ export default function DocumentDetailPage() {
   const [saving, setSaving] = useState(false);
   const [creatingRun, setCreatingRun] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [exportingMarkdown, setExportingMarkdown] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [runsError, setRunsError] = useState<string | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
   const [generationSuccess, setGenerationSuccess] = useState<string | null>(
     null
   );
@@ -320,6 +322,65 @@ export default function DocumentDetailPage() {
       await loadRuns();
     } finally {
       setGenerating(false);
+    }
+  };
+
+  const handleExportMarkdown = async () => {
+    if (!projectId || !documentId) return;
+
+    const token = localStorage.getItem("token");
+
+    if (!token) {
+      router.replace("/login");
+      return;
+    }
+
+    setExportingMarkdown(true);
+    setExportError(null);
+
+    try {
+      const response = await fetch(
+        `/api/projects/${projectId}/documents/${documentId}/export/markdown`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      if (response.status === 401) {
+        localStorage.removeItem("token");
+        router.replace("/login");
+      }
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as
+          | ApiResponse<unknown>
+          | null;
+        throw new Error(payload?.message || "Unable to export Markdown");
+      }
+
+      const blob = await response.blob();
+      const disposition = response.headers.get("Content-Disposition") || "";
+      const filenameMatch = disposition.match(/filename="([^"]+)"/);
+      const filename = filenameMatch?.[1] || "document.md";
+      const url = window.URL.createObjectURL(blob);
+      const link = window.document.createElement("a");
+
+      link.href = url;
+      link.download = filename;
+      window.document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (downloadError) {
+      setExportError(
+        downloadError instanceof Error
+          ? downloadError.message
+          : "Unable to export Markdown"
+      );
+    } finally {
+      setExportingMarkdown(false);
     }
   };
 
@@ -602,9 +663,29 @@ export default function DocumentDetailPage() {
             </section>
 
             <section className={`${CARD} p-6`}>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-blue-500">
-                Content
-              </p>
+              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-blue-500">
+                    Content
+                  </p>
+                  <p className="mt-2 text-sm font-medium leading-6 text-black/55">
+                    Export uses the latest saved document content.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleExportMarkdown}
+                  disabled={exportingMarkdown}
+                  className={BUTTON_SUBTLE}
+                >
+                  {exportingMarkdown ? "Exporting..." : "Export Markdown"}
+                </button>
+              </div>
+              {exportError && (
+                <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm font-bold text-red-700">
+                  {exportError}
+                </div>
+              )}
               <textarea
                 value={form.content}
                 onChange={(event) =>
