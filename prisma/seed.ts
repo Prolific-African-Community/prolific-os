@@ -18,6 +18,9 @@ const templates = [
   "Custom Document",
 ];
 
+const templateIdFor = (name: string) =>
+  name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+
 async function main() {
   await prisma.user.upsert({
     where: { email: ADMIN_EMAIL },
@@ -35,21 +38,24 @@ async function main() {
   });
 
   for (const name of templates) {
+    const description = `${name} starter template.`;
+
     await prisma.template.upsert({
       where: {
-        id: name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""),
+        id: templateIdFor(name),
       },
       update: {
         name,
         type: name,
+        description,
         structure: "Define the document structure before generation.",
         generationRules: "Use project knowledge and user instructions as source context.",
       },
       create: {
-        id: name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""),
+        id: templateIdFor(name),
         name,
         type: name,
-        description: `${name} starter template.`,
+        description,
         structure: "Define the document structure before generation.",
         generationRules: "Use project knowledge and user instructions as source context.",
       },
