@@ -1,22 +1,9 @@
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/router";
+import { LogoMark } from "../components/app-shell";
 
 type ClassValue = string | false | null | undefined;
 const cn = (...c: ClassValue[]) => c.filter(Boolean).join(" ");
-
-function LogoMark() {
-  return (
-    <div className="flex items-center gap-2">
-      <div className="flex h-6 w-7 items-center gap-[3px]">
-        <span className="h-6 w-3 rounded-[2px] bg-black" />
-        <span className="h-6 w-3 rounded-[2px] bg-black" />
-      </div>
-      <span className="text-sm font-bold tracking-tight text-black">
-        Proliquid
-      </span>
-    </div>
-  );
-}
 
 function LoginVisual() {
   const pixels = Array.from({ length: 64 });
@@ -29,18 +16,18 @@ function LoginVisual() {
         </div>
 
         <h2 className="mt-8 max-w-sm text-[3rem] font-bold leading-[0.98] tracking-[-0.05em]">
-          Financial clarity starts here.
+          Structured work starts here.
         </h2>
 
         <p className="mt-6 max-w-sm text-sm font-medium leading-7 text-white/50">
-          Access your investment dashboard, reporting documents, investor
-          records and operational workflows from one controlled environment.
+          Access your private AI workspace for projects, knowledge, templates,
+          and professional deliverables.
         </p>
       </div>
 
       <div className="absolute bottom-12 left-10 right-10 z-10 rounded-[2rem] border border-white/10 bg-white/[0.04] p-6 backdrop-blur">
         <div className="flex items-center justify-between text-xs text-white/50">
-          <span>Portfolio visibility</span>
+          <span>Workspace visibility</span>
           <span className="text-blue-300">Live</span>
         </div>
 
@@ -125,11 +112,7 @@ export default function LoginPage() {
         return;
       }
 
-      if (role === "ADMIN") {
-        await router.push("/dashboard/admin");
-      } else {
-        await router.push("/dashboard");
-      }
+      await router.push("/dashboard");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to login");
     } finally {
@@ -157,16 +140,16 @@ export default function LoginPage() {
 
               <div className="mt-16">
                 <p className="text-xs font-semibold uppercase tracking-[0.14em] text-blue-500">
-                  Investment platform
+                  Private AI workspace
                 </p>
 
                 <h1 className="mt-4 max-w-sm text-[2.6rem] font-bold leading-[0.98] tracking-[-0.05em] text-black md:text-[3.6rem]">
-                  Sign in to Proliquid
+                  Sign in to Prolific OS
                 </h1>
 
                 <p className="mt-6 max-w-sm text-sm font-medium leading-7 text-black/60">
-                  Access your financial administration workspace, investor
-                  records, reporting documents and operational workflows.
+                  Access your structured workspace for projects, resources,
+                  templates, and deliverables.
                 </p>
               </div>
 
@@ -216,7 +199,7 @@ export default function LoginPage() {
 
               <div className="mt-8 flex flex-wrap items-center justify-between gap-4 text-xs font-medium text-black/45">
                 <span>Secure controlled access</span>
-                <span>Audit-ready environment</span>
+                <span>Validated workspace flow</span>
               </div>
             </div>
           </section>
