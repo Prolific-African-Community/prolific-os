@@ -1,10 +1,10 @@
-import type { NextApiHandler, NextApiRequest, NextApiResponse } from 'next';
-import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
-import { OrganizationStatus, PlatformRole, UserRole } from '@prisma/client';
-import { prisma } from './prisma';
+import type { NextApiHandler, NextApiRequest, NextApiResponse } from "next";
+import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
+import { UserRole } from "@prisma/client";
+import { prisma } from "./prisma";
 
-const JWT_EXPIRES_IN = '1d';
+const JWT_EXPIRES_IN = "1d";
 
 export interface AuthTokenPayload {
   sub: string;
@@ -15,8 +15,7 @@ export interface AuthTokenPayload {
 export interface AuthenticatedUser {
   id: string;
   email?: string;
-  role?: string;
-  [key: string]: any;
+  role?: UserRole;
 }
 
 export interface AuthenticatedNextApiRequest extends NextApiRequest {
@@ -32,7 +31,7 @@ const getJwtSecret = (): string => {
   const secret = process.env.JWT_SECRET;
 
   if (!secret) {
-    throw new Error('JWT_SECRET is not configured');
+    throw new Error("JWT_SECRET is not configured");
   }
 
   return secret;
@@ -42,7 +41,10 @@ export const hashPassword = async (password: string): Promise<string> => {
   return bcrypt.hash(password, 12);
 };
 
-export const comparePassword = async (password: string, hash: string): Promise<boolean> => {
+export const comparePassword = async (
+  password: string,
+  hash: string
+): Promise<boolean> => {
   return bcrypt.compare(password, hash);
 };
 
@@ -59,7 +61,7 @@ const DEFAULT_AUTH_ROLES = Object.values(UserRole) as UserRole[];
 const getBearerToken = (req: NextApiRequest): string | null => {
   const authHeader = req.headers.authorization;
 
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
     return null;
   }
 
@@ -74,85 +76,35 @@ export const withAuth = (
     const token = getBearerToken(req);
 
     if (!token) {
-      return res.status(401).json({ success: false, message: 'Unauthorized' });
+      return res.status(401).json({ success: false, message: "Unauthorized" });
     }
 
     try {
       const payload = verifyAuthToken(token);
 
       if (!allowedRoles.includes(payload.role)) {
-        return res.status(403).json({ success: false, message: 'Forbidden' });
+        return res.status(403).json({ success: false, message: "Forbidden" });
       }
 
       const user = await prisma.user.findUnique({
         where: { id: payload.sub },
-        select: {
-          role: true,
-          platformRole: true,
-          organizationUsers: {
-            where: { isActive: true },
-            select: {
-              organization: {
-                select: {
-                  isActive: true,
-                  status: true,
-                },
-              },
-            },
-          },
-          entityUsers: {
-            where: { isActive: true },
-            select: {
-              entity: {
-                select: {
-                  organization: {
-                    select: {
-                      isActive: true,
-                      status: true,
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
+        select: { id: true, email: true, role: true },
       });
 
       if (!user) {
-        return res.status(401).json({ success: false, message: 'Unauthorized' });
-      }
-
-      const isPlatformAdmin =
-        user.platformRole === PlatformRole.SUPER_ADMIN || user.role === UserRole.ADMIN;
-      const hasTenantMemberships =
-        user.organizationUsers.length > 0 || user.entityUsers.length > 0;
-      const hasActiveOrganization = user.organizationUsers.some(
-        (membership) =>
-          membership.organization.isActive &&
-          membership.organization.status === OrganizationStatus.ACTIVE
-      ) || user.entityUsers.some(
-        (membership) =>
-          membership.entity.organization.isActive &&
-          membership.entity.organization.status === OrganizationStatus.ACTIVE
-      );
-
-      if (!isPlatformAdmin && hasTenantMemberships && !hasActiveOrganization) {
-        return res.status(403).json({
-          success: false,
-          message:
-            'Your organization is currently inactive. Please contact your administrator.',
-        });
+        return res.status(401).json({ success: false, message: "Unauthorized" });
       }
 
       const authenticatedReq = req as AuthenticatedNextApiRequest;
       authenticatedReq.user = {
-        ...payload,
-        id: payload.sub,
+        id: user.id,
+        email: user.email,
+        role: user.role,
       };
 
       return handler(authenticatedReq, res);
     } catch {
-      return res.status(401).json({ success: false, message: 'Unauthorized' });
+      return res.status(401).json({ success: false, message: "Unauthorized" });
     }
   };
 };

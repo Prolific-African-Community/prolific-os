@@ -1,7 +1,10 @@
-import { NextApiRequest, NextApiResponse } from "next";
+import type { NextApiRequest, NextApiResponse } from "next";
+import { hashPassword, verifyAuthToken } from "../../../lib/auth";
 import { prisma } from "../../../lib/prisma";
-import { verifyAuthToken } from "../../../lib/auth";
-import bcrypt from "bcryptjs";
+
+interface ChangePasswordBody {
+  password?: string;
+}
 
 export default async function handler(
   req: NextApiRequest,
@@ -13,19 +16,22 @@ export default async function handler(
 
   try {
     const token = req.headers.authorization?.split(" ")[1];
-    if (!token) return res.status(401).json({ message: "Unauthorized" });
+
+    if (!token) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
 
     const user = verifyAuthToken(token);
+    const { password } = req.body as ChangePasswordBody;
 
-    const { password } = req.body;
-
-    const hashedPassword = await bcrypt.hash(password, 12);
+    if (!password) {
+      return res.status(400).json({ message: "Password is required" });
+    }
 
     await prisma.user.update({
       where: { id: user.sub },
       data: {
-        password: hashedPassword,
-        mustChangePassword: false,
+        passwordHash: await hashPassword(password),
       },
     });
 
