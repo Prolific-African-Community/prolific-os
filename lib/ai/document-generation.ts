@@ -61,7 +61,11 @@ export function buildGenerationInputSummary({
     return `${item.title}${category}`;
   });
   const resourceSummary = resources.slice(0, 8).map((item) => {
-    return `${item.filename} (${item.mimeType})`;
+    const extractedText = item.extractedText
+      ? `\n  Extracted text: ${clamp(item.extractedText, 600)}`
+      : "";
+
+    return `${item.filename} (${item.mimeType})${extractedText}`;
   });
 
   return [

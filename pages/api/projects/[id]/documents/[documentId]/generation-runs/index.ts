@@ -35,6 +35,9 @@ const serializeRun = (run: GenerationRun) => ({
 const shortList = (items: string[]) =>
   items.length ? items.map((item) => `- ${item}`).join("\n") : "- None";
 
+const clamp = (value: string, limit = 600) =>
+  value.length > limit ? `${value.slice(0, limit)}...` : value;
+
 function buildInputSummary({
   project,
   document,
@@ -51,7 +54,11 @@ function buildInputSummary({
     return `${item.title}${category}`;
   });
   const resourceSummary = resources.slice(0, 8).map((item) => {
-    return `${item.filename} (${item.mimeType})`;
+    const extractedText = item.extractedText
+      ? `\n  Extracted text: ${clamp(item.extractedText)}`
+      : "";
+
+    return `${item.filename} (${item.mimeType})${extractedText}`;
   });
 
   return [

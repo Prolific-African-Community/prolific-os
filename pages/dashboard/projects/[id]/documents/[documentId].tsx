@@ -119,6 +119,7 @@ export default function DocumentDetailPage() {
   const [generating, setGenerating] = useState(false);
   const [exportingMarkdown, setExportingMarkdown] = useState(false);
   const [exportingDocx, setExportingDocx] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [runsError, setRunsError] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -326,7 +327,7 @@ export default function DocumentDetailPage() {
     }
   };
 
-  const handleExport = async (format: "markdown" | "docx") => {
+  const handleExport = async (format: "markdown" | "docx" | "pdf") => {
     if (!projectId || !documentId) return;
 
     const token = localStorage.getItem("token");
@@ -338,8 +339,10 @@ export default function DocumentDetailPage() {
 
     if (format === "markdown") {
       setExportingMarkdown(true);
-    } else {
+    } else if (format === "docx") {
       setExportingDocx(true);
+    } else {
+      setExportingPdf(true);
     }
 
     setExportError(null);
@@ -370,7 +373,8 @@ export default function DocumentDetailPage() {
       const disposition = response.headers.get("Content-Disposition") || "";
       const filenameMatch = disposition.match(/filename="([^"]+)"/);
       const filename =
-        filenameMatch?.[1] || (format === "markdown" ? "document.md" : "document.docx");
+        filenameMatch?.[1] ||
+        (format === "markdown" ? "document.md" : `document.${format}`);
       const url = window.URL.createObjectURL(blob);
       const link = window.document.createElement("a");
 
@@ -389,8 +393,10 @@ export default function DocumentDetailPage() {
     } finally {
       if (format === "markdown") {
         setExportingMarkdown(false);
-      } else {
+      } else if (format === "docx") {
         setExportingDocx(false);
+      } else {
+        setExportingPdf(false);
       }
     }
   };
@@ -701,6 +707,14 @@ export default function DocumentDetailPage() {
                     className={BUTTON_SUBTLE}
                   >
                     {exportingDocx ? "Exporting..." : "Export DOCX"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleExport("pdf")}
+                    disabled={exportingPdf || !hasSavedContent}
+                    className={BUTTON_SUBTLE}
+                  >
+                    {exportingPdf ? "Exporting..." : "Export PDF"}
                   </button>
                 </div>
               </div>

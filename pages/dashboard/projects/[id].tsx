@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { FormEvent, useEffect, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/router";
 import { AppShell } from "../../../components/app-shell";
 
@@ -187,6 +187,9 @@ export default function ProjectDetailPage() {
   const [resources, setResources] = useState<ResourceItem[]>([]);
   const [resourceForm, setResourceForm] =
     useState<ResourceForm>(initialResourceForm);
+  const [resourceUploadFile, setResourceUploadFile] = useState<File | null>(
+    null
+  );
   const [editingResourceId, setEditingResourceId] = useState<string | null>(
     null
   );
@@ -201,6 +204,7 @@ export default function ProjectDetailPage() {
   const [savingDocument, setSavingDocument] = useState(false);
   const [savingKnowledge, setSavingKnowledge] = useState(false);
   const [savingResource, setSavingResource] = useState(false);
+  const [uploadingResource, setUploadingResource] = useState(false);
   const [updatingDocumentId, setUpdatingDocumentId] = useState<string | null>(
     null
   );
@@ -661,6 +665,70 @@ export default function ProjectDetailPage() {
       );
     } finally {
       setSavingResource(false);
+    }
+  };
+
+  const handleResourceUploadFileChange = (
+    event: ChangeEvent<HTMLInputElement>
+  ) => {
+    setResourceUploadFile(event.target.files?.[0] || null);
+    setResourcesError(null);
+  };
+
+  const handleResourceUpload = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!projectId) return;
+
+    if (!resourceUploadFile) {
+      setResourcesError("Choose a file to upload");
+      return;
+    }
+
+    const token = localStorage.getItem("token");
+
+    if (!token) {
+      router.replace("/login");
+      return;
+    }
+
+    const formElement = event.currentTarget;
+    const formData = new FormData();
+    formData.append("file", resourceUploadFile);
+
+    setUploadingResource(true);
+    setResourcesError(null);
+
+    try {
+      const response = await fetch(`/api/projects/${projectId}/resources/upload`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        body: formData,
+      });
+      const payload = (await response.json()) as ApiResponse<ResourceItem>;
+
+      if (response.status === 401) {
+        localStorage.removeItem("token");
+        router.replace("/login");
+      }
+
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.message || "Unable to upload resource");
+      }
+
+      formElement.reset();
+      setResourceUploadFile(null);
+      await loadResources();
+    } catch (uploadError) {
+      setResourcesError(
+        uploadError instanceof Error
+          ? uploadError.message
+          : "Unable to upload resource"
+      );
+    } finally {
+      setUploadingResource(false);
     }
   };
 
@@ -1418,12 +1486,51 @@ export default function ProjectDetailPage() {
                 Project resources
               </h2>
               <p className="max-w-2xl text-sm font-medium leading-6 text-black/55">
-                Register source files, reference URLs, and extracted notes that
-                belong to this project. Binary upload will be handled separately.
+                Upload source files or register reference URLs and extracted
+                notes that belong to this project.
               </p>
             </div>
 
+            <form
+              className="mt-6 rounded-2xl border border-black/10 bg-black/[0.02] p-4"
+              onSubmit={handleResourceUpload}
+            >
+              <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
+                <label className="block">
+                  <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.14em] text-black/45">
+                    Upload file
+                  </span>
+                  <input
+                    type="file"
+                    accept=".pdf,.docx,.xlsx,.md,.markdown,.txt,.png,.jpg,.jpeg,.webp,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/markdown,text/plain,image/png,image/jpeg,image/webp"
+                    onChange={handleResourceUploadFileChange}
+                    className={INPUT}
+                  />
+                </label>
+                <button
+                  type="submit"
+                  disabled={uploadingResource || !resourceUploadFile}
+                  className={BUTTON_DARK}
+                >
+                  {uploadingResource ? "Uploading..." : "Upload file"}
+                </button>
+              </div>
+              <p className="mt-3 text-xs font-semibold text-black/45">
+                Supported: PDF, DOCX, XLSX, Markdown, TXT, PNG, JPG, JPEG, WebP.
+                Max 10 MB.
+              </p>
+            </form>
+
             <form className="mt-6 grid gap-4" onSubmit={handleResourceCreate}>
+              <div>
+                <p className="text-sm font-semibold tracking-[-0.02em]">
+                  Add resource metadata manually
+                </p>
+                <p className="mt-1 text-sm font-medium leading-6 text-black/50">
+                  Use this for external links, notes, or resources that are not
+                  uploaded directly.
+                </p>
+              </div>
               <div className="grid gap-4 md:grid-cols-[1fr_220px_180px]">
                 <label className="block">
                   <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.14em] text-black/45">
@@ -1651,20 +1758,25 @@ export default function ProjectDetailPage() {
                             </div>
                             {item.storageUrl && (
                               <a
-                                href={item.storageUrl}
+                                href={`/api/projects/${projectId}/resources/${item.id}/download`}
                                 target="_blank"
                                 rel="noreferrer"
-                                className="mt-3 inline-flex max-w-full text-sm font-semibold text-blue-600 underline decoration-blue-600/25 underline-offset-4"
+                                className="mt-3 inline-flex text-sm font-semibold text-blue-600 underline decoration-blue-600/25 underline-offset-4"
                               >
-                                {item.storageUrl}
+                                Open file
                               </a>
                             )}
                             {item.extractedText && (
-                              <p className="mt-3 text-sm font-medium leading-6 text-black/60">
-                                {item.extractedText.length > 220
-                                  ? `${item.extractedText.slice(0, 220)}...`
-                                  : item.extractedText}
-                              </p>
+                              <div className="mt-3 rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3">
+                                <p className="text-xs font-bold uppercase tracking-[0.12em] text-emerald-700">
+                                  Text extracted
+                                </p>
+                                <p className="mt-2 text-sm font-medium leading-6 text-black/60">
+                                  {item.extractedText.length > 220
+                                    ? `${item.extractedText.slice(0, 220)}...`
+                                    : item.extractedText}
+                                </p>
+                              </div>
                             )}
                             <p className="mt-3 text-xs font-medium text-black/40">
                               Updated {formatDate(item.updatedAt)}
