@@ -4,6 +4,12 @@ import { useRouter } from "next/router";
 import { AppShell } from "../../../components/app-shell";
 
 type ProjectStatus = "ACTIVE" | "ARCHIVED";
+type DocumentStatus =
+  | "DRAFT"
+  | "GENERATING"
+  | "READY_FOR_REVIEW"
+  | "APPROVED"
+  | "ARCHIVED";
 
 interface ProjectDetail {
   id: string;
@@ -39,6 +45,41 @@ interface KnowledgeForm {
   title: string;
   category: string;
   content: string;
+}
+
+interface TemplateRecord {
+  id: string;
+  name: string;
+  type: string;
+  description?: string | null;
+}
+
+interface DocumentItem {
+  id: string;
+  projectId: string;
+  templateId?: string | null;
+  template?: {
+    id: string;
+    name: string;
+    type: string;
+  } | null;
+  title: string;
+  type: string;
+  objective: string;
+  instructions?: string | null;
+  status: DocumentStatus;
+  outline?: string | null;
+  content?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface DocumentForm {
+  title: string;
+  type: string;
+  objective: string;
+  instructions: string;
+  templateId: string;
 }
 
 interface ResourceItem {
@@ -104,6 +145,14 @@ const initialKnowledgeForm = (): KnowledgeForm => ({
   content: "",
 });
 
+const initialDocumentForm = (): DocumentForm => ({
+  title: "",
+  type: "",
+  objective: "",
+  instructions: "",
+  templateId: "",
+});
+
 const initialResourceForm = (): ResourceForm => ({
   filename: "",
   mimeType: "",
@@ -118,6 +167,15 @@ export default function ProjectDetailPage() {
     typeof router.query.id === "string" ? router.query.id : undefined;
   const [project, setProject] = useState<ProjectDetail | null>(null);
   const [form, setForm] = useState({ name: "", description: "" });
+  const [templates, setTemplates] = useState<TemplateRecord[]>([]);
+  const [documents, setDocuments] = useState<DocumentItem[]>([]);
+  const [documentForm, setDocumentForm] =
+    useState<DocumentForm>(initialDocumentForm);
+  const [editingDocumentId, setEditingDocumentId] = useState<string | null>(
+    null
+  );
+  const [documentEditForm, setDocumentEditForm] =
+    useState<DocumentForm>(initialDocumentForm);
   const [knowledgeItems, setKnowledgeItems] = useState<KnowledgeItem[]>([]);
   const [knowledgeForm, setKnowledgeForm] =
     useState<KnowledgeForm>(initialKnowledgeForm);
@@ -135,11 +193,17 @@ export default function ProjectDetailPage() {
   const [resourceEditForm, setResourceEditForm] =
     useState<ResourceForm>(initialResourceForm);
   const [loading, setLoading] = useState(true);
+  const [templatesLoading, setTemplatesLoading] = useState(true);
+  const [documentsLoading, setDocumentsLoading] = useState(true);
   const [knowledgeLoading, setKnowledgeLoading] = useState(true);
   const [resourcesLoading, setResourcesLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [savingDocument, setSavingDocument] = useState(false);
   const [savingKnowledge, setSavingKnowledge] = useState(false);
   const [savingResource, setSavingResource] = useState(false);
+  const [updatingDocumentId, setUpdatingDocumentId] = useState<string | null>(
+    null
+  );
   const [updatingKnowledgeId, setUpdatingKnowledgeId] = useState<string | null>(
     null
   );
@@ -152,8 +216,12 @@ export default function ProjectDetailPage() {
   const [deletingResourceId, setDeletingResourceId] = useState<string | null>(
     null
   );
+  const [deletingDocumentId, setDeletingDocumentId] = useState<string | null>(
+    null
+  );
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [documentsError, setDocumentsError] = useState<string | null>(null);
   const [knowledgeError, setKnowledgeError] = useState<string | null>(null);
   const [resourcesError, setResourcesError] = useState<string | null>(null);
 
@@ -208,6 +276,44 @@ export default function ProjectDetailPage() {
     }
   };
 
+  const loadTemplates = async () => {
+    setDocumentsError(null);
+
+    try {
+      const data = await request<TemplateRecord[]>("/api/templates");
+      setTemplates(data);
+    } catch (loadError) {
+      setDocumentsError(
+        loadError instanceof Error
+          ? loadError.message
+          : "Unable to load templates"
+      );
+    } finally {
+      setTemplatesLoading(false);
+    }
+  };
+
+  const loadDocuments = async () => {
+    if (!projectId) return;
+
+    setDocumentsError(null);
+
+    try {
+      const data = await request<DocumentItem[]>(
+        `/api/projects/${projectId}/documents`
+      );
+      setDocuments(data);
+    } catch (loadError) {
+      setDocumentsError(
+        loadError instanceof Error
+          ? loadError.message
+          : "Unable to load documents"
+      );
+    } finally {
+      setDocumentsLoading(false);
+    }
+  };
+
   const loadKnowledge = async () => {
     if (!projectId) return;
 
@@ -253,6 +359,8 @@ export default function ProjectDetailPage() {
   useEffect(() => {
     if (!router.isReady || !projectId) return;
     loadProject();
+    loadTemplates();
+    loadDocuments();
     loadKnowledge();
     loadResources();
   }, [router.isReady, projectId]);
@@ -314,6 +422,109 @@ export default function ProjectDetailPage() {
       );
     } finally {
       setUpdatingStatus(false);
+    }
+  };
+
+  const handleDocumentCreate = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!projectId) return;
+
+    setSavingDocument(true);
+    setDocumentsError(null);
+
+    try {
+      await request<DocumentItem>(`/api/projects/${projectId}/documents`, {
+        method: "POST",
+        body: JSON.stringify(documentForm),
+      });
+      setDocumentForm(initialDocumentForm);
+      await loadDocuments();
+    } catch (createError) {
+      setDocumentsError(
+        createError instanceof Error
+          ? createError.message
+          : "Unable to create document"
+      );
+    } finally {
+      setSavingDocument(false);
+    }
+  };
+
+  const startDocumentEdit = (item: DocumentItem) => {
+    setEditingDocumentId(item.id);
+    setDocumentEditForm({
+      title: item.title,
+      type: item.type,
+      objective: item.objective,
+      instructions: item.instructions || "",
+      templateId: item.templateId || "",
+    });
+    setDocumentsError(null);
+  };
+
+  const handleDocumentUpdate = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!projectId || !editingDocumentId) return;
+
+    setUpdatingDocumentId(editingDocumentId);
+    setDocumentsError(null);
+
+    try {
+      await request<DocumentItem>(
+        `/api/projects/${projectId}/documents/${editingDocumentId}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify(documentEditForm),
+        }
+      );
+      setEditingDocumentId(null);
+      setDocumentEditForm(initialDocumentForm);
+      await loadDocuments();
+    } catch (updateError) {
+      setDocumentsError(
+        updateError instanceof Error
+          ? updateError.message
+          : "Unable to update document"
+      );
+    } finally {
+      setUpdatingDocumentId(null);
+    }
+  };
+
+  const handleDocumentDelete = async (item: DocumentItem) => {
+    if (!projectId) return;
+
+    const confirmed = window.confirm(
+      `Delete "${item.title}" from this project's documents?`
+    );
+
+    if (!confirmed) return;
+
+    setDeletingDocumentId(item.id);
+    setDocumentsError(null);
+
+    try {
+      await request<{ id: string }>(
+        `/api/projects/${projectId}/documents/${item.id}`,
+        {
+          method: "DELETE",
+        }
+      );
+      await loadDocuments();
+
+      if (editingDocumentId === item.id) {
+        setEditingDocumentId(null);
+      }
+    } catch (deleteError) {
+      setDocumentsError(
+        deleteError instanceof Error
+          ? deleteError.message
+          : "Unable to delete document"
+      );
+    } finally {
+      setDeletingDocumentId(null);
     }
   };
 
@@ -533,6 +744,7 @@ export default function ProjectDetailPage() {
     }
   };
 
+  const documentsCount = documents.length;
   const knowledgeCount = knowledgeItems.length;
   const resourcesCount = resources.length;
 
@@ -652,7 +864,7 @@ export default function ProjectDetailPage() {
             {[
               {
                 label: "Documents",
-                value: project.counts?.documents ?? 0,
+                value: documentsCount,
                 copy: "Documents will be generated from this project context.",
               },
               {
@@ -680,6 +892,302 @@ export default function ProjectDetailPage() {
                 </p>
               </article>
             ))}
+          </section>
+
+          <section className={`${CARD} mt-4 p-6`}>
+            <div className="flex flex-col gap-2">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-blue-500">
+                Documents
+              </p>
+              <h2 className="text-xl font-semibold tracking-[-0.04em]">
+                Project documents
+              </h2>
+              <p className="max-w-2xl text-sm font-medium leading-6 text-black/55">
+                Create document requests from this project context. Draft
+                content remains manual until generation is added.
+              </p>
+            </div>
+
+            <form className="mt-6 grid gap-4" onSubmit={handleDocumentCreate}>
+              <div className="grid gap-4 md:grid-cols-[1fr_220px_260px]">
+                <label className="block">
+                  <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.14em] text-black/45">
+                    Title
+                  </span>
+                  <input
+                    value={documentForm.title}
+                    onChange={(event) =>
+                      setDocumentForm((current) => ({
+                        ...current,
+                        title: event.target.value,
+                      }))
+                    }
+                    className={INPUT}
+                    placeholder="Partnership proposal"
+                    required
+                  />
+                </label>
+                <label className="block">
+                  <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.14em] text-black/45">
+                    Type
+                  </span>
+                  <input
+                    value={documentForm.type}
+                    onChange={(event) =>
+                      setDocumentForm((current) => ({
+                        ...current,
+                        type: event.target.value,
+                      }))
+                    }
+                    className={INPUT}
+                    placeholder="Proposal"
+                    required
+                  />
+                </label>
+                <label className="block">
+                  <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.14em] text-black/45">
+                    Template
+                  </span>
+                  <select
+                    value={documentForm.templateId}
+                    onChange={(event) =>
+                      setDocumentForm((current) => ({
+                        ...current,
+                        templateId: event.target.value,
+                      }))
+                    }
+                    className={INPUT}
+                    disabled={templatesLoading}
+                  >
+                    <option value="">No template</option>
+                    {templates.map((template) => (
+                      <option key={template.id} value={template.id}>
+                        {template.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <label className="block">
+                <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.14em] text-black/45">
+                  Objective
+                </span>
+                <textarea
+                  value={documentForm.objective}
+                  onChange={(event) =>
+                    setDocumentForm((current) => ({
+                      ...current,
+                      objective: event.target.value,
+                    }))
+                  }
+                  className={TEXTAREA}
+                  placeholder="Describe what this document needs to achieve."
+                  required
+                />
+              </label>
+              <label className="block">
+                <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.14em] text-black/45">
+                  Instructions
+                </span>
+                <textarea
+                  value={documentForm.instructions}
+                  onChange={(event) =>
+                    setDocumentForm((current) => ({
+                      ...current,
+                      instructions: event.target.value,
+                    }))
+                  }
+                  className={TEXTAREA}
+                  placeholder="Optional tone, structure, constraints, or source priorities."
+                />
+              </label>
+              <div>
+                <button
+                  type="submit"
+                  disabled={savingDocument}
+                  className={BUTTON_BLUE}
+                >
+                  {savingDocument ? "Creating..." : "Create document"}
+                </button>
+              </div>
+            </form>
+
+            {documentsError && (
+              <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm font-bold text-red-700">
+                {documentsError}
+              </div>
+            )}
+
+            <div className="mt-6">
+              {documentsLoading ? (
+                <div className="animate-pulse space-y-3">
+                  {Array.from({ length: 3 }).map((_, index) => (
+                    <div key={index} className="h-24 rounded-2xl bg-black/5" />
+                  ))}
+                </div>
+              ) : !documents.length ? (
+                <div className="rounded-2xl border border-dashed border-black/15 bg-black/[0.02] p-8 text-center">
+                  <p className="text-sm font-semibold">No documents yet.</p>
+                  <p className="mx-auto mt-2 max-w-xl text-sm font-medium leading-6 text-black/55">
+                    Create the first document request for this project. It can
+                    be drafted manually now and generated later.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {documents.map((item) => (
+                    <article
+                      key={item.id}
+                      className="rounded-2xl border border-black/10 bg-black/[0.02] p-5"
+                    >
+                      {editingDocumentId === item.id ? (
+                        <form
+                          className="grid gap-4"
+                          onSubmit={handleDocumentUpdate}
+                        >
+                          <div className="grid gap-4 md:grid-cols-[1fr_220px_260px]">
+                            <input
+                              value={documentEditForm.title}
+                              onChange={(event) =>
+                                setDocumentEditForm((current) => ({
+                                  ...current,
+                                  title: event.target.value,
+                                }))
+                              }
+                              className={INPUT}
+                              required
+                            />
+                            <input
+                              value={documentEditForm.type}
+                              onChange={(event) =>
+                                setDocumentEditForm((current) => ({
+                                  ...current,
+                                  type: event.target.value,
+                                }))
+                              }
+                              className={INPUT}
+                              required
+                            />
+                            <select
+                              value={documentEditForm.templateId}
+                              onChange={(event) =>
+                                setDocumentEditForm((current) => ({
+                                  ...current,
+                                  templateId: event.target.value,
+                                }))
+                              }
+                              className={INPUT}
+                            >
+                              <option value="">No template</option>
+                              {templates.map((template) => (
+                                <option key={template.id} value={template.id}>
+                                  {template.name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <textarea
+                            value={documentEditForm.objective}
+                            onChange={(event) =>
+                              setDocumentEditForm((current) => ({
+                                ...current,
+                                objective: event.target.value,
+                              }))
+                            }
+                            className={TEXTAREA}
+                            required
+                          />
+                          <textarea
+                            value={documentEditForm.instructions}
+                            onChange={(event) =>
+                              setDocumentEditForm((current) => ({
+                                ...current,
+                                instructions: event.target.value,
+                              }))
+                            }
+                            className={TEXTAREA}
+                            placeholder="Instructions"
+                          />
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="submit"
+                              disabled={updatingDocumentId === item.id}
+                              className={BUTTON_DARK}
+                            >
+                              {updatingDocumentId === item.id
+                                ? "Saving..."
+                                : "Save"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingDocumentId(null)}
+                              className={BUTTON_SUBTLE}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </form>
+                      ) : (
+                        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                          <div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <h3 className="text-base font-semibold tracking-[-0.03em]">
+                                {item.title}
+                              </h3>
+                              <span className="rounded-full bg-white px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-black/50">
+                                {item.status}
+                              </span>
+                            </div>
+                            <div className="mt-2 flex flex-wrap gap-2 text-xs font-semibold text-black/50">
+                              <span className="rounded-full bg-white px-3 py-1">
+                                {item.type}
+                              </span>
+                              {item.template && (
+                                <span className="rounded-full bg-blue-50 px-3 py-1 text-blue-600">
+                                  {item.template.name}
+                                </span>
+                              )}
+                            </div>
+                            <p className="mt-3 text-sm font-medium leading-6 text-black/60">
+                              {item.objective.length > 220
+                                ? `${item.objective.slice(0, 220)}...`
+                                : item.objective}
+                            </p>
+                            <p className="mt-3 text-xs font-medium text-black/40">
+                              Updated {formatDate(item.updatedAt)}
+                            </p>
+                          </div>
+                          <div className="flex shrink-0 flex-wrap gap-2">
+                            <Link
+                              href={`/dashboard/projects/${projectId}/documents/${item.id}`}
+                            >
+                              <a className={BUTTON_DARK}>Open</a>
+                            </Link>
+                            <button
+                              type="button"
+                              onClick={() => startDocumentEdit(item)}
+                              className={BUTTON_SUBTLE}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              disabled={deletingDocumentId === item.id}
+                              onClick={() => handleDocumentDelete(item)}
+                              className={BUTTON_SUBTLE}
+                            >
+                              {deletingDocumentId === item.id
+                                ? "Deleting..."
+                                : "Delete"}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </article>
+                  ))}
+                </div>
+              )}
+            </div>
           </section>
 
           <section className={`${CARD} mt-4 p-6`}>
