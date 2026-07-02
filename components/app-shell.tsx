@@ -84,7 +84,10 @@ export function AppShell({
 
           <div className="flex flex-wrap items-center gap-2">
             {NAV_ITEMS.map((item) => {
-              const isActive = router.pathname === item.href;
+              const isActive =
+                router.pathname === item.href ||
+                (item.href !== "/dashboard" &&
+                  router.pathname.startsWith(item.href));
 
               return (
                 <Link key={item.href} href={item.href}>
