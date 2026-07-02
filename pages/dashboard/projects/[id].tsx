@@ -41,6 +41,27 @@ interface KnowledgeForm {
   content: string;
 }
 
+interface ResourceItem {
+  id: string;
+  projectId: string;
+  documentId?: string | null;
+  filename: string;
+  mimeType: string;
+  sizeBytes?: number | null;
+  storageUrl?: string | null;
+  extractedText?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface ResourceForm {
+  filename: string;
+  mimeType: string;
+  sizeBytes: string;
+  storageUrl: string;
+  extractedText: string;
+}
+
 const CARD =
   "rounded-[1.5rem] border border-black/10 bg-white shadow-[0_12px_35px_rgba(15,23,42,0.05)]";
 const INPUT =
@@ -71,10 +92,24 @@ function statusClass(status: ProjectStatus) {
     : "bg-slate-100 text-slate-600";
 }
 
+function formatSize(value?: number | null) {
+  if (value === undefined || value === null) return "Size not set";
+
+  return `${new Intl.NumberFormat("en-GB").format(value)} bytes`;
+}
+
 const initialKnowledgeForm = (): KnowledgeForm => ({
   title: "",
   category: "",
   content: "",
+});
+
+const initialResourceForm = (): ResourceForm => ({
+  filename: "",
+  mimeType: "",
+  sizeBytes: "",
+  storageUrl: "",
+  extractedText: "",
 });
 
 export default function ProjectDetailPage() {
@@ -91,19 +126,36 @@ export default function ProjectDetailPage() {
   );
   const [knowledgeEditForm, setKnowledgeEditForm] =
     useState<KnowledgeForm>(initialKnowledgeForm);
+  const [resources, setResources] = useState<ResourceItem[]>([]);
+  const [resourceForm, setResourceForm] =
+    useState<ResourceForm>(initialResourceForm);
+  const [editingResourceId, setEditingResourceId] = useState<string | null>(
+    null
+  );
+  const [resourceEditForm, setResourceEditForm] =
+    useState<ResourceForm>(initialResourceForm);
   const [loading, setLoading] = useState(true);
   const [knowledgeLoading, setKnowledgeLoading] = useState(true);
+  const [resourcesLoading, setResourcesLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savingKnowledge, setSavingKnowledge] = useState(false);
+  const [savingResource, setSavingResource] = useState(false);
   const [updatingKnowledgeId, setUpdatingKnowledgeId] = useState<string | null>(
+    null
+  );
+  const [updatingResourceId, setUpdatingResourceId] = useState<string | null>(
     null
   );
   const [deletingKnowledgeId, setDeletingKnowledgeId] = useState<string | null>(
     null
   );
+  const [deletingResourceId, setDeletingResourceId] = useState<string | null>(
+    null
+  );
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [knowledgeError, setKnowledgeError] = useState<string | null>(null);
+  const [resourcesError, setResourcesError] = useState<string | null>(null);
 
   const request = async <T,>(url: string, options: RequestInit = {}) => {
     const token = localStorage.getItem("token");
@@ -177,10 +229,32 @@ export default function ProjectDetailPage() {
     }
   };
 
+  const loadResources = async () => {
+    if (!projectId) return;
+
+    setResourcesError(null);
+
+    try {
+      const data = await request<ResourceItem[]>(
+        `/api/projects/${projectId}/resources`
+      );
+      setResources(data);
+    } catch (loadError) {
+      setResourcesError(
+        loadError instanceof Error
+          ? loadError.message
+          : "Unable to load resources"
+      );
+    } finally {
+      setResourcesLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (!router.isReady || !projectId) return;
     loadProject();
     loadKnowledge();
+    loadResources();
   }, [router.isReady, projectId]);
 
   const handleSave = async (event: FormEvent<HTMLFormElement>) => {
@@ -353,7 +427,114 @@ export default function ProjectDetailPage() {
     }
   };
 
+  const handleResourceCreate = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!projectId) return;
+
+    setSavingResource(true);
+    setResourcesError(null);
+
+    try {
+      await request<ResourceItem>(`/api/projects/${projectId}/resources`, {
+        method: "POST",
+        body: JSON.stringify(resourceForm),
+      });
+      setResourceForm(initialResourceForm);
+      await loadResources();
+    } catch (createError) {
+      setResourcesError(
+        createError instanceof Error
+          ? createError.message
+          : "Unable to create resource"
+      );
+    } finally {
+      setSavingResource(false);
+    }
+  };
+
+  const startResourceEdit = (item: ResourceItem) => {
+    setEditingResourceId(item.id);
+    setResourceEditForm({
+      filename: item.filename,
+      mimeType: item.mimeType,
+      sizeBytes:
+        item.sizeBytes === undefined || item.sizeBytes === null
+          ? ""
+          : String(item.sizeBytes),
+      storageUrl: item.storageUrl || "",
+      extractedText: item.extractedText || "",
+    });
+    setResourcesError(null);
+  };
+
+  const handleResourceUpdate = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!projectId || !editingResourceId) return;
+
+    setUpdatingResourceId(editingResourceId);
+    setResourcesError(null);
+
+    try {
+      await request<ResourceItem>(
+        `/api/projects/${projectId}/resources/${editingResourceId}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify(resourceEditForm),
+        }
+      );
+      setEditingResourceId(null);
+      setResourceEditForm(initialResourceForm);
+      await loadResources();
+    } catch (updateError) {
+      setResourcesError(
+        updateError instanceof Error
+          ? updateError.message
+          : "Unable to update resource"
+      );
+    } finally {
+      setUpdatingResourceId(null);
+    }
+  };
+
+  const handleResourceDelete = async (item: ResourceItem) => {
+    if (!projectId) return;
+
+    const confirmed = window.confirm(
+      `Delete "${item.filename}" from this project's resources?`
+    );
+
+    if (!confirmed) return;
+
+    setDeletingResourceId(item.id);
+    setResourcesError(null);
+
+    try {
+      await request<{ id: string }>(
+        `/api/projects/${projectId}/resources/${item.id}`,
+        {
+          method: "DELETE",
+        }
+      );
+      await loadResources();
+
+      if (editingResourceId === item.id) {
+        setEditingResourceId(null);
+      }
+    } catch (deleteError) {
+      setResourcesError(
+        deleteError instanceof Error
+          ? deleteError.message
+          : "Unable to delete resource"
+      );
+    } finally {
+      setDeletingResourceId(null);
+    }
+  };
+
   const knowledgeCount = knowledgeItems.length;
+  const resourcesCount = resources.length;
 
   return (
     <AppShell
@@ -481,7 +662,7 @@ export default function ProjectDetailPage() {
               },
               {
                 label: "Resources",
-                value: project.counts?.resources ?? 0,
+                value: resourcesCount,
                 copy: "Resources will contain uploaded files used for generation.",
               },
             ].map((item) => (
@@ -712,6 +893,295 @@ export default function ProjectDetailPage() {
                             </div>
                           </div>
                         </>
+                      )}
+                    </article>
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
+
+          <section className={`${CARD} mt-4 p-6`}>
+            <div className="flex flex-col gap-2">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-blue-500">
+                Resources
+              </p>
+              <h2 className="text-xl font-semibold tracking-[-0.04em]">
+                Project resources
+              </h2>
+              <p className="max-w-2xl text-sm font-medium leading-6 text-black/55">
+                Register source files, reference URLs, and extracted notes that
+                belong to this project. Binary upload will be handled separately.
+              </p>
+            </div>
+
+            <form className="mt-6 grid gap-4" onSubmit={handleResourceCreate}>
+              <div className="grid gap-4 md:grid-cols-[1fr_220px_180px]">
+                <label className="block">
+                  <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.14em] text-black/45">
+                    File name
+                  </span>
+                  <input
+                    value={resourceForm.filename}
+                    onChange={(event) =>
+                      setResourceForm((current) => ({
+                        ...current,
+                        filename: event.target.value,
+                      }))
+                    }
+                    className={INPUT}
+                    placeholder="brief.pdf"
+                    required
+                  />
+                </label>
+                <label className="block">
+                  <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.14em] text-black/45">
+                    MIME type
+                  </span>
+                  <input
+                    value={resourceForm.mimeType}
+                    onChange={(event) =>
+                      setResourceForm((current) => ({
+                        ...current,
+                        mimeType: event.target.value,
+                      }))
+                    }
+                    className={INPUT}
+                    placeholder="application/pdf"
+                    required
+                  />
+                </label>
+                <label className="block">
+                  <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.14em] text-black/45">
+                    Size in bytes
+                  </span>
+                  <input
+                    value={resourceForm.sizeBytes}
+                    onChange={(event) =>
+                      setResourceForm((current) => ({
+                        ...current,
+                        sizeBytes: event.target.value,
+                      }))
+                    }
+                    className={INPUT}
+                    inputMode="numeric"
+                    placeholder="204800"
+                  />
+                </label>
+              </div>
+
+              <label className="block">
+                <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.14em] text-black/45">
+                  File URL
+                </span>
+                <input
+                  value={resourceForm.storageUrl}
+                  onChange={(event) =>
+                    setResourceForm((current) => ({
+                      ...current,
+                      storageUrl: event.target.value,
+                    }))
+                  }
+                  className={INPUT}
+                  placeholder="https://..."
+                />
+              </label>
+
+              <label className="block">
+                <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.14em] text-black/45">
+                  Extracted text / notes
+                </span>
+                <textarea
+                  value={resourceForm.extractedText}
+                  onChange={(event) =>
+                    setResourceForm((current) => ({
+                      ...current,
+                      extractedText: event.target.value,
+                    }))
+                  }
+                  className={TEXTAREA}
+                  placeholder="Paste useful extracted text or reference notes."
+                />
+              </label>
+
+              <div>
+                <button
+                  type="submit"
+                  disabled={savingResource}
+                  className={BUTTON_BLUE}
+                >
+                  {savingResource ? "Adding..." : "Add resource"}
+                </button>
+              </div>
+            </form>
+
+            {resourcesError && (
+              <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm font-bold text-red-700">
+                {resourcesError}
+              </div>
+            )}
+
+            <div className="mt-6">
+              {resourcesLoading ? (
+                <div className="animate-pulse space-y-3">
+                  {Array.from({ length: 3 }).map((_, index) => (
+                    <div key={index} className="h-24 rounded-2xl bg-black/5" />
+                  ))}
+                </div>
+              ) : !resources.length ? (
+                <div className="rounded-2xl border border-dashed border-black/15 bg-black/[0.02] p-8 text-center">
+                  <p className="text-sm font-semibold">
+                    No project resources yet.
+                  </p>
+                  <p className="mx-auto mt-2 max-w-xl text-sm font-medium leading-6 text-black/55">
+                    Add file metadata, reference URLs, and extracted notes that
+                    should be available when this project starts producing documents.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {resources.map((item) => (
+                    <article
+                      key={item.id}
+                      className="rounded-2xl border border-black/10 bg-black/[0.02] p-5"
+                    >
+                      {editingResourceId === item.id ? (
+                        <form
+                          className="grid gap-4"
+                          onSubmit={handleResourceUpdate}
+                        >
+                          <div className="grid gap-4 md:grid-cols-[1fr_220px_180px]">
+                            <input
+                              value={resourceEditForm.filename}
+                              onChange={(event) =>
+                                setResourceEditForm((current) => ({
+                                  ...current,
+                                  filename: event.target.value,
+                                }))
+                              }
+                              className={INPUT}
+                              required
+                            />
+                            <input
+                              value={resourceEditForm.mimeType}
+                              onChange={(event) =>
+                                setResourceEditForm((current) => ({
+                                  ...current,
+                                  mimeType: event.target.value,
+                                }))
+                              }
+                              className={INPUT}
+                              required
+                            />
+                            <input
+                              value={resourceEditForm.sizeBytes}
+                              onChange={(event) =>
+                                setResourceEditForm((current) => ({
+                                  ...current,
+                                  sizeBytes: event.target.value,
+                                }))
+                              }
+                              className={INPUT}
+                              inputMode="numeric"
+                              placeholder="Size in bytes"
+                            />
+                          </div>
+                          <input
+                            value={resourceEditForm.storageUrl}
+                            onChange={(event) =>
+                              setResourceEditForm((current) => ({
+                                ...current,
+                                storageUrl: event.target.value,
+                              }))
+                            }
+                            className={INPUT}
+                            placeholder="File URL"
+                          />
+                          <textarea
+                            value={resourceEditForm.extractedText}
+                            onChange={(event) =>
+                              setResourceEditForm((current) => ({
+                                ...current,
+                                extractedText: event.target.value,
+                              }))
+                            }
+                            className={TEXTAREA}
+                            placeholder="Extracted text / notes"
+                          />
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="submit"
+                              disabled={updatingResourceId === item.id}
+                              className={BUTTON_DARK}
+                            >
+                              {updatingResourceId === item.id
+                                ? "Saving..."
+                                : "Save"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingResourceId(null)}
+                              className={BUTTON_SUBTLE}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </form>
+                      ) : (
+                        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                          <div>
+                            <h3 className="text-base font-semibold tracking-[-0.03em]">
+                              {item.filename}
+                            </h3>
+                            <div className="mt-2 flex flex-wrap gap-2 text-xs font-semibold text-black/50">
+                              <span className="rounded-full bg-white px-3 py-1">
+                                {item.mimeType}
+                              </span>
+                              <span className="rounded-full bg-white px-3 py-1">
+                                {formatSize(item.sizeBytes)}
+                              </span>
+                            </div>
+                            {item.storageUrl && (
+                              <a
+                                href={item.storageUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="mt-3 inline-flex max-w-full text-sm font-semibold text-blue-600 underline decoration-blue-600/25 underline-offset-4"
+                              >
+                                {item.storageUrl}
+                              </a>
+                            )}
+                            {item.extractedText && (
+                              <p className="mt-3 text-sm font-medium leading-6 text-black/60">
+                                {item.extractedText.length > 220
+                                  ? `${item.extractedText.slice(0, 220)}...`
+                                  : item.extractedText}
+                              </p>
+                            )}
+                            <p className="mt-3 text-xs font-medium text-black/40">
+                              Updated {formatDate(item.updatedAt)}
+                            </p>
+                          </div>
+                          <div className="flex shrink-0 flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={() => startResourceEdit(item)}
+                              className={BUTTON_SUBTLE}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              disabled={deletingResourceId === item.id}
+                              onClick={() => handleResourceDelete(item)}
+                              className={BUTTON_SUBTLE}
+                            >
+                              {deletingResourceId === item.id
+                                ? "Deleting..."
+                                : "Delete"}
+                            </button>
+                          </div>
+                        </div>
                       )}
                     </article>
                   ))}
