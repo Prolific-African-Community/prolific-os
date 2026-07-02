@@ -118,6 +118,7 @@ export default function DocumentDetailPage() {
   const [creatingRun, setCreatingRun] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [exportingMarkdown, setExportingMarkdown] = useState(false);
+  const [exportingDocx, setExportingDocx] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [runsError, setRunsError] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -325,7 +326,7 @@ export default function DocumentDetailPage() {
     }
   };
 
-  const handleExportMarkdown = async () => {
+  const handleExport = async (format: "markdown" | "docx") => {
     if (!projectId || !documentId) return;
 
     const token = localStorage.getItem("token");
@@ -335,12 +336,17 @@ export default function DocumentDetailPage() {
       return;
     }
 
-    setExportingMarkdown(true);
+    if (format === "markdown") {
+      setExportingMarkdown(true);
+    } else {
+      setExportingDocx(true);
+    }
+
     setExportError(null);
 
     try {
       const response = await fetch(
-        `/api/projects/${projectId}/documents/${documentId}/export/markdown`,
+        `/api/projects/${projectId}/documents/${documentId}/export/${format}`,
         {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -357,13 +363,14 @@ export default function DocumentDetailPage() {
         const payload = (await response.json().catch(() => null)) as
           | ApiResponse<unknown>
           | null;
-        throw new Error(payload?.message || "Unable to export Markdown");
+        throw new Error(payload?.message || `Unable to export ${format}`);
       }
 
       const blob = await response.blob();
       const disposition = response.headers.get("Content-Disposition") || "";
       const filenameMatch = disposition.match(/filename="([^"]+)"/);
-      const filename = filenameMatch?.[1] || "document.md";
+      const filename =
+        filenameMatch?.[1] || (format === "markdown" ? "document.md" : "document.docx");
       const url = window.URL.createObjectURL(blob);
       const link = window.document.createElement("a");
 
@@ -377,12 +384,18 @@ export default function DocumentDetailPage() {
       setExportError(
         downloadError instanceof Error
           ? downloadError.message
-          : "Unable to export Markdown"
+          : `Unable to export ${format}`
       );
     } finally {
-      setExportingMarkdown(false);
+      if (format === "markdown") {
+        setExportingMarkdown(false);
+      } else {
+        setExportingDocx(false);
+      }
     }
   };
+
+  const hasSavedContent = Boolean(document?.content?.trim());
 
   return (
     <AppShell
@@ -672,15 +685,30 @@ export default function DocumentDetailPage() {
                     Export uses the latest saved document content.
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={handleExportMarkdown}
-                  disabled={exportingMarkdown}
-                  className={BUTTON_SUBTLE}
-                >
-                  {exportingMarkdown ? "Exporting..." : "Export Markdown"}
-                </button>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleExport("markdown")}
+                    disabled={exportingMarkdown || !hasSavedContent}
+                    className={BUTTON_SUBTLE}
+                  >
+                    {exportingMarkdown ? "Exporting..." : "Export Markdown"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleExport("docx")}
+                    disabled={exportingDocx || !hasSavedContent}
+                    className={BUTTON_SUBTLE}
+                  >
+                    {exportingDocx ? "Exporting..." : "Export DOCX"}
+                  </button>
+                </div>
               </div>
+              {!hasSavedContent && (
+                <p className="mt-4 text-sm font-semibold text-black/45">
+                  Generate or write content before exporting.
+                </p>
+              )}
               {exportError && (
                 <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm font-bold text-red-700">
                   {exportError}
