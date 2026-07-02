@@ -25,10 +25,27 @@ interface ApiResponse<T> {
   message?: string;
 }
 
+interface KnowledgeItem {
+  id: string;
+  projectId: string;
+  title: string;
+  content: string;
+  category?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface KnowledgeForm {
+  title: string;
+  category: string;
+  content: string;
+}
+
 const CARD =
   "rounded-[1.5rem] border border-black/10 bg-white shadow-[0_12px_35px_rgba(15,23,42,0.05)]";
 const INPUT =
   "w-full rounded-2xl border border-black/10 bg-white px-4 py-3 text-sm font-medium text-black outline-none transition placeholder:text-black/30 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10";
+const TEXTAREA = `${INPUT} min-h-[140px] resize-y leading-6`;
 const BUTTON_BLUE =
   "inline-flex items-center justify-center rounded-full bg-blue-500 px-4 py-2.5 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-50";
 const BUTTON_DARK =
@@ -54,16 +71,39 @@ function statusClass(status: ProjectStatus) {
     : "bg-slate-100 text-slate-600";
 }
 
+const initialKnowledgeForm = (): KnowledgeForm => ({
+  title: "",
+  category: "",
+  content: "",
+});
+
 export default function ProjectDetailPage() {
   const router = useRouter();
   const projectId =
     typeof router.query.id === "string" ? router.query.id : undefined;
   const [project, setProject] = useState<ProjectDetail | null>(null);
   const [form, setForm] = useState({ name: "", description: "" });
+  const [knowledgeItems, setKnowledgeItems] = useState<KnowledgeItem[]>([]);
+  const [knowledgeForm, setKnowledgeForm] =
+    useState<KnowledgeForm>(initialKnowledgeForm);
+  const [editingKnowledgeId, setEditingKnowledgeId] = useState<string | null>(
+    null
+  );
+  const [knowledgeEditForm, setKnowledgeEditForm] =
+    useState<KnowledgeForm>(initialKnowledgeForm);
   const [loading, setLoading] = useState(true);
+  const [knowledgeLoading, setKnowledgeLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [savingKnowledge, setSavingKnowledge] = useState(false);
+  const [updatingKnowledgeId, setUpdatingKnowledgeId] = useState<string | null>(
+    null
+  );
+  const [deletingKnowledgeId, setDeletingKnowledgeId] = useState<string | null>(
+    null
+  );
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [knowledgeError, setKnowledgeError] = useState<string | null>(null);
 
   const request = async <T,>(url: string, options: RequestInit = {}) => {
     const token = localStorage.getItem("token");
@@ -116,9 +156,31 @@ export default function ProjectDetailPage() {
     }
   };
 
+  const loadKnowledge = async () => {
+    if (!projectId) return;
+
+    setKnowledgeError(null);
+
+    try {
+      const data = await request<KnowledgeItem[]>(
+        `/api/projects/${projectId}/knowledge`
+      );
+      setKnowledgeItems(data);
+    } catch (loadError) {
+      setKnowledgeError(
+        loadError instanceof Error
+          ? loadError.message
+          : "Unable to load knowledge"
+      );
+    } finally {
+      setKnowledgeLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (!router.isReady || !projectId) return;
     loadProject();
+    loadKnowledge();
   }, [router.isReady, projectId]);
 
   const handleSave = async (event: FormEvent<HTMLFormElement>) => {
@@ -180,6 +242,118 @@ export default function ProjectDetailPage() {
       setUpdatingStatus(false);
     }
   };
+
+  const handleKnowledgeCreate = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!projectId) return;
+
+    setSavingKnowledge(true);
+    setKnowledgeError(null);
+
+    try {
+      const knowledgeItem = await request<KnowledgeItem>(
+        `/api/projects/${projectId}/knowledge`,
+        {
+          method: "POST",
+          body: JSON.stringify(knowledgeForm),
+        }
+      );
+      setKnowledgeItems((current) => [knowledgeItem, ...current]);
+      setKnowledgeForm(initialKnowledgeForm);
+    } catch (createError) {
+      setKnowledgeError(
+        createError instanceof Error
+          ? createError.message
+          : "Unable to create knowledge"
+      );
+    } finally {
+      setSavingKnowledge(false);
+    }
+  };
+
+  const startKnowledgeEdit = (item: KnowledgeItem) => {
+    setEditingKnowledgeId(item.id);
+    setKnowledgeEditForm({
+      title: item.title,
+      category: item.category || "",
+      content: item.content,
+    });
+    setKnowledgeError(null);
+  };
+
+  const handleKnowledgeUpdate = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!projectId || !editingKnowledgeId) return;
+
+    setUpdatingKnowledgeId(editingKnowledgeId);
+    setKnowledgeError(null);
+
+    try {
+      const knowledgeItem = await request<KnowledgeItem>(
+        `/api/projects/${projectId}/knowledge/${editingKnowledgeId}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify(knowledgeEditForm),
+        }
+      );
+      setKnowledgeItems((current) =>
+        current.map((item) =>
+          item.id === knowledgeItem.id ? knowledgeItem : item
+        )
+      );
+      setEditingKnowledgeId(null);
+      setKnowledgeEditForm(initialKnowledgeForm);
+    } catch (updateError) {
+      setKnowledgeError(
+        updateError instanceof Error
+          ? updateError.message
+          : "Unable to update knowledge"
+      );
+    } finally {
+      setUpdatingKnowledgeId(null);
+    }
+  };
+
+  const handleKnowledgeDelete = async (item: KnowledgeItem) => {
+    if (!projectId) return;
+
+    const confirmed = window.confirm(
+      `Delete "${item.title}" from this project's knowledge?`
+    );
+
+    if (!confirmed) return;
+
+    setDeletingKnowledgeId(item.id);
+    setKnowledgeError(null);
+
+    try {
+      await request<{ id: string }>(
+        `/api/projects/${projectId}/knowledge/${item.id}`,
+        {
+          method: "DELETE",
+        }
+      );
+      setKnowledgeItems((current) =>
+        current.filter((knowledgeItem) => knowledgeItem.id !== item.id)
+      );
+
+      if (editingKnowledgeId === item.id) {
+        setEditingKnowledgeId(null);
+      }
+    } catch (deleteError) {
+      setKnowledgeError(
+        deleteError instanceof Error
+          ? deleteError.message
+          : "Unable to delete knowledge"
+      );
+    } finally {
+      setDeletingKnowledgeId(null);
+    }
+  };
+
+  const knowledgeCount = knowledgeItems.length;
 
   return (
     <AppShell
@@ -302,7 +476,7 @@ export default function ProjectDetailPage() {
               },
               {
                 label: "Knowledge",
-                value: project.counts?.knowledgeItems ?? 0,
+                value: knowledgeCount,
                 copy: "Knowledge will store reusable project facts and instructions.",
               },
               {
@@ -325,6 +499,225 @@ export default function ProjectDetailPage() {
                 </p>
               </article>
             ))}
+          </section>
+
+          <section className={`${CARD} mt-4 p-6`}>
+            <div className="flex flex-col gap-2">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-blue-500">
+                Knowledge
+              </p>
+              <h2 className="text-xl font-semibold tracking-[-0.04em]">
+                Project knowledge
+              </h2>
+              <p className="max-w-2xl text-sm font-medium leading-6 text-black/55">
+                Store reusable facts, instructions, constraints, and context
+                that future documents can use from this project.
+              </p>
+            </div>
+
+            <form className="mt-6 grid gap-4" onSubmit={handleKnowledgeCreate}>
+              <div className="grid gap-4 md:grid-cols-[1fr_240px]">
+                <label className="block">
+                  <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.14em] text-black/45">
+                    Title
+                  </span>
+                  <input
+                    value={knowledgeForm.title}
+                    onChange={(event) =>
+                      setKnowledgeForm((current) => ({
+                        ...current,
+                        title: event.target.value,
+                      }))
+                    }
+                    className={INPUT}
+                    placeholder="Client positioning"
+                    required
+                  />
+                </label>
+                <label className="block">
+                  <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.14em] text-black/45">
+                    Category
+                  </span>
+                  <input
+                    value={knowledgeForm.category}
+                    onChange={(event) =>
+                      setKnowledgeForm((current) => ({
+                        ...current,
+                        category: event.target.value,
+                      }))
+                    }
+                    className={INPUT}
+                    placeholder="Strategy"
+                  />
+                </label>
+              </div>
+              <label className="block">
+                <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.14em] text-black/45">
+                  Content
+                </span>
+                <textarea
+                  value={knowledgeForm.content}
+                  onChange={(event) =>
+                    setKnowledgeForm((current) => ({
+                      ...current,
+                      content: event.target.value,
+                    }))
+                  }
+                  className={TEXTAREA}
+                  placeholder="Add the reusable context, decision, source note, or instruction."
+                  required
+                />
+              </label>
+              <div>
+                <button
+                  type="submit"
+                  disabled={savingKnowledge}
+                  className={BUTTON_BLUE}
+                >
+                  {savingKnowledge ? "Adding..." : "Add knowledge"}
+                </button>
+              </div>
+            </form>
+
+            {knowledgeError && (
+              <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm font-bold text-red-700">
+                {knowledgeError}
+              </div>
+            )}
+
+            <div className="mt-6">
+              {knowledgeLoading ? (
+                <div className="animate-pulse space-y-3">
+                  {Array.from({ length: 3 }).map((_, index) => (
+                    <div key={index} className="h-24 rounded-2xl bg-black/5" />
+                  ))}
+                </div>
+              ) : !knowledgeItems.length ? (
+                <div className="rounded-2xl border border-dashed border-black/15 bg-black/[0.02] p-8 text-center">
+                  <p className="text-sm font-semibold">
+                    No project knowledge yet.
+                  </p>
+                  <p className="mx-auto mt-2 max-w-xl text-sm font-medium leading-6 text-black/55">
+                    Add facts, instructions, reference notes, or constraints
+                    that should remain available throughout this project.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {knowledgeItems.map((item) => (
+                    <article
+                      key={item.id}
+                      className="rounded-2xl border border-black/10 bg-black/[0.02] p-5"
+                    >
+                      {editingKnowledgeId === item.id ? (
+                        <form
+                          className="grid gap-4"
+                          onSubmit={handleKnowledgeUpdate}
+                        >
+                          <div className="grid gap-4 md:grid-cols-[1fr_220px]">
+                            <input
+                              value={knowledgeEditForm.title}
+                              onChange={(event) =>
+                                setKnowledgeEditForm((current) => ({
+                                  ...current,
+                                  title: event.target.value,
+                                }))
+                              }
+                              className={INPUT}
+                              required
+                            />
+                            <input
+                              value={knowledgeEditForm.category}
+                              onChange={(event) =>
+                                setKnowledgeEditForm((current) => ({
+                                  ...current,
+                                  category: event.target.value,
+                                }))
+                              }
+                              className={INPUT}
+                              placeholder="Category"
+                            />
+                          </div>
+                          <textarea
+                            value={knowledgeEditForm.content}
+                            onChange={(event) =>
+                              setKnowledgeEditForm((current) => ({
+                                ...current,
+                                content: event.target.value,
+                              }))
+                            }
+                            className={TEXTAREA}
+                            required
+                          />
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="submit"
+                              disabled={updatingKnowledgeId === item.id}
+                              className={BUTTON_DARK}
+                            >
+                              {updatingKnowledgeId === item.id
+                                ? "Saving..."
+                                : "Save"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingKnowledgeId(null)}
+                              className={BUTTON_SUBTLE}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </form>
+                      ) : (
+                        <>
+                          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                            <div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <h3 className="text-base font-semibold tracking-[-0.03em]">
+                                  {item.title}
+                                </h3>
+                                {item.category && (
+                                  <span className="rounded-full bg-blue-50 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-blue-600">
+                                    {item.category}
+                                  </span>
+                                )}
+                              </div>
+                              <p className="mt-2 text-sm font-medium leading-6 text-black/60">
+                                {item.content.length > 240
+                                  ? `${item.content.slice(0, 240)}...`
+                                  : item.content}
+                              </p>
+                              <p className="mt-3 text-xs font-medium text-black/40">
+                                Updated {formatDate(item.updatedAt)}
+                              </p>
+                            </div>
+                            <div className="flex shrink-0 flex-wrap gap-2">
+                              <button
+                                type="button"
+                                onClick={() => startKnowledgeEdit(item)}
+                                className={BUTTON_SUBTLE}
+                              >
+                                Edit
+                              </button>
+                              <button
+                                type="button"
+                                disabled={deletingKnowledgeId === item.id}
+                                onClick={() => handleKnowledgeDelete(item)}
+                                className={BUTTON_SUBTLE}
+                              >
+                                {deletingKnowledgeId === item.id
+                                  ? "Deleting..."
+                                  : "Delete"}
+                              </button>
+                            </div>
+                          </div>
+                        </>
+                      )}
+                    </article>
+                  ))}
+                </div>
+              )}
+            </div>
           </section>
         </>
       )}
