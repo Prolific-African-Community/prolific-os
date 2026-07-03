@@ -1,10 +1,10 @@
-import type { Resource } from "@prisma/client";
 import type { NextApiResponse } from "next";
 import {
   AuthenticatedNextApiRequest,
   withAuth,
 } from "../../../../../lib/auth";
 import { prisma } from "../../../../../lib/prisma";
+import { serializeResource } from "../../../../../lib/resources/extraction-meta";
 
 interface ResourceUpdateBody {
   filename?: unknown;
@@ -29,19 +29,6 @@ const normalizeSizeBytes = (value: unknown) => {
     ? numberValue
     : undefined;
 };
-
-const serializeResource = (resource: Resource) => ({
-  id: resource.id,
-  projectId: resource.projectId,
-  documentId: resource.documentId,
-  filename: resource.filename,
-  mimeType: resource.mimeType,
-  sizeBytes: resource.sizeBytes,
-  storageUrl: resource.storageUrl,
-  extractedText: resource.extractedText,
-  createdAt: resource.createdAt.toISOString(),
-  updatedAt: resource.updatedAt.toISOString(),
-});
 
 async function getOwnedProject(projectId: string, userId: string) {
   return prisma.project.findFirst({
