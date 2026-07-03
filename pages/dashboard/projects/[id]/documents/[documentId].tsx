@@ -18,6 +18,12 @@ import {
   buttonClass,
   cn,
 } from "../../../../../components/ui";
+import {
+  DOCUMENT_PLAN_STATUS_UI,
+  DocumentPlan,
+  DocumentPlanStatus,
+  planKeyFigureCount,
+} from "../../../../../lib/documents/document-plan";
 
 type DocumentStatus =
   | "DRAFT"
@@ -51,6 +57,9 @@ interface DocumentDetail {
   status: DocumentStatus;
   outline?: string | null;
   content?: string | null;
+  documentPlan?: DocumentPlan | null;
+  documentPlanStatus?: DocumentPlanStatus | null;
+  documentPlanUpdatedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -127,6 +136,12 @@ export default function DocumentDetailPage() {
   const [saving, setSaving] = useState(false);
   const [creatingRun, setCreatingRun] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [plan, setPlan] = useState<DocumentPlan | null>(null);
+  const [planStatus, setPlanStatus] = useState<DocumentPlanStatus | null>(null);
+  const [planUpdatedAt, setPlanUpdatedAt] = useState<string | null>(null);
+  const [planning, setPlanning] = useState(false);
+  const [planError, setPlanError] = useState<string | null>(null);
+  const [showPlan, setShowPlan] = useState(false);
   const [exportingMarkdown, setExportingMarkdown] = useState(false);
   const [exportingDocx, setExportingDocx] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
@@ -197,6 +212,9 @@ export default function DocumentDetailPage() {
         `/api/projects/${projectId}/documents/${documentId}`
       );
       setDocument(data);
+      setPlan(data.documentPlan ?? null);
+      setPlanStatus(data.documentPlanStatus ?? null);
+      setPlanUpdatedAt(data.documentPlanUpdatedAt ?? null);
       setForm({
         title: data.title,
         type: data.type,
@@ -290,6 +308,41 @@ export default function DocumentDetailPage() {
       );
     } finally {
       setCreatingRun(false);
+    }
+  };
+
+  const handleGeneratePlan = async () => {
+    if (!projectId || !documentId) return;
+    setPlanning(true);
+    setPlanError(null);
+    try {
+      const res = await request<{
+        documentPlan: DocumentPlan | null;
+        documentPlanStatus: DocumentPlanStatus;
+        documentPlanUpdatedAt: string | null;
+        warning?: string | null;
+      }>(`/api/projects/${projectId}/documents/${documentId}/plan`, {
+        method: "POST",
+      });
+      setPlan(res.documentPlan);
+      setPlanStatus(res.documentPlanStatus);
+      setPlanUpdatedAt(res.documentPlanUpdatedAt);
+      if (res.documentPlanStatus === "failed") {
+        setPlanError(
+          res.warning ||
+            "Document plan could not be generated. Check OpenAI configuration."
+        );
+      } else if (res.documentPlan) {
+        setShowPlan(true);
+      }
+    } catch (planErr) {
+      setPlanError(
+        planErr instanceof Error
+          ? planErr.message
+          : "Unable to generate document plan"
+      );
+    } finally {
+      setPlanning(false);
     }
   };
 
@@ -664,6 +717,156 @@ export default function DocumentDetailPage() {
 
             {/* Side panel */}
             <div className="space-y-6 lg:sticky lg:top-6 lg:self-start">
+              {/* Document plan */}
+              <Card className="p-6">
+                <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-accent-600">
+                  <Icon name="layers" size={14} />
+                  Document plan
+                </div>
+                <p className="mt-2 text-sm leading-6 text-ink-muted">
+                  Plan the sections and source allocation before writing — it
+                  makes the document more controlled and specific.
+                </p>
+
+                {(() => {
+                  const status: DocumentPlanStatus = planStatus ?? "pending";
+                  const ui = DOCUMENT_PLAN_STATUS_UI[status];
+                  return (
+                    <div className="mt-4 flex flex-wrap items-center gap-2">
+                      <Badge
+                        tone={ui.tone}
+                        icon={
+                          status === "ready"
+                            ? "check"
+                            : status === "failed"
+                            ? "alert"
+                            : undefined
+                        }
+                      >
+                        {ui.label}
+                      </Badge>
+                      {plan ? (
+                        <>
+                          <Badge tone="neutral" icon="documents">
+                            {plan.sections.length} sections
+                          </Badge>
+                          {planKeyFigureCount(plan) > 0 && (
+                            <Badge tone="neutral" icon="bolt">
+                              {planKeyFigureCount(plan)} figures
+                            </Badge>
+                          )}
+                        </>
+                      ) : null}
+                    </div>
+                  );
+                })()}
+
+                {planError && (
+                  <Alert tone="danger" className="mt-4">
+                    {planError}
+                  </Alert>
+                )}
+
+                {plan && (
+                  <div className="mt-4 space-y-3">
+                    {plan.executiveIntent && (
+                      <p className="text-sm leading-6 text-ink-soft">
+                        {plan.executiveIntent.length > 220
+                          ? `${plan.executiveIntent.slice(0, 220)}…`
+                          : plan.executiveIntent}
+                      </p>
+                    )}
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="rounded-lg bg-ink/[0.03] px-3 py-2">
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-muted">
+                          Sources used
+                        </p>
+                        <p className="text-sm font-semibold text-ink">
+                          {plan.sourceCoverage.resourcesUsed.length}
+                        </p>
+                      </div>
+                      <div className="rounded-lg bg-ink/[0.03] px-3 py-2">
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-muted">
+                          Missing info
+                        </p>
+                        <p className="text-sm font-semibold text-ink">
+                          {plan.missingInformation.length}
+                        </p>
+                      </div>
+                    </div>
+
+                    {plan.sourceCoverage.warnings.length > 0 && (
+                      <div className="rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-2.5">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-amber-700">
+                          Coverage warnings
+                        </p>
+                        <ul className="mt-1 space-y-0.5">
+                          {plan.sourceCoverage.warnings.slice(0, 3).map((w, i) => (
+                            <li key={i} className="text-xs leading-5 text-amber-700">
+                              • {w}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => setShowPlan((v) => !v)}
+                      className="inline-flex items-center gap-1.5 text-xs font-semibold text-ink-muted transition-colors hover:text-ink"
+                    >
+                      <Icon
+                        name={showPlan ? "chevron-down" : "chevron-right"}
+                        size={14}
+                      />
+                      {showPlan ? "Hide" : "Show"} planned sections
+                    </button>
+
+                    {showPlan && (
+                      <ol className="space-y-1.5 rounded-xl bg-ink/[0.02] p-3">
+                        {plan.sections.map((s, i) => (
+                          <li key={s.id} className="text-xs leading-5">
+                            <span className="font-semibold text-ink">
+                              {i + 1}. {s.title}
+                            </span>
+                            {s.keyFigures.length > 0 && (
+                              <span className="text-ink-muted">
+                                {" "}
+                                · {s.keyFigures.length} figure
+                                {s.keyFigures.length > 1 ? "s" : ""}
+                              </span>
+                            )}
+                          </li>
+                        ))}
+                      </ol>
+                    )}
+                  </div>
+                )}
+
+                <div className="mt-5">
+                  <Button
+                    type="button"
+                    variant={plan ? "ghost" : "primary"}
+                    onClick={handleGeneratePlan}
+                    loading={planning}
+                    icon="layers"
+                    className="w-full"
+                  >
+                    {planning
+                      ? "Planning…"
+                      : plan
+                      ? "Refresh plan"
+                      : "Generate document plan"}
+                  </Button>
+                  {planUpdatedAt && (
+                    <p className="mt-2 text-xs text-ink-faint">
+                      Updated {formatDate(planUpdatedAt)}
+                    </p>
+                  )}
+                </div>
+              </Card>
+
               {/* Generate */}
               <Card className="p-6">
                 <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-accent-600">
@@ -674,6 +877,31 @@ export default function DocumentDetailPage() {
                   We&apos;ll use this project&apos;s context to draft the
                   document. Review before generating.
                 </p>
+
+                {planStatus === "ready" || planStatus === "partial" ? (
+                  <div className="mt-3 flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-2.5">
+                    <Icon
+                      name="check-circle"
+                      size={16}
+                      className="shrink-0 text-emerald-500"
+                    />
+                    <p className="text-xs leading-5 text-emerald-700">
+                      A document plan is ready — generation will follow it.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="mt-3 flex items-center gap-2 rounded-xl border border-line bg-ink/[0.02] px-3.5 py-2.5">
+                    <Icon
+                      name="info"
+                      size={16}
+                      className="shrink-0 text-ink-muted"
+                    />
+                    <p className="text-xs leading-5 text-ink-muted">
+                      Tip: generate a document plan first for a more controlled,
+                      specific result.
+                    </p>
+                  </div>
+                )}
 
                 <div className="mt-4 space-y-2">
                   {readiness.map((r) => (
@@ -731,7 +959,11 @@ export default function DocumentDetailPage() {
                     icon="generate"
                     className="w-full"
                   >
-                    {generating ? "Generating…" : "Generate document"}
+                    {generating
+                      ? "Generating…"
+                      : planStatus === "ready" || planStatus === "partial"
+                      ? "Generate from plan"
+                      : "Generate document"}
                   </Button>
                   <Button
                     type="button"

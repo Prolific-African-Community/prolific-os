@@ -15,6 +15,11 @@ export function getDistillationModel() {
   return process.env.OPENAI_MODEL_DISTILLATION || getOpenAIModel();
 }
 
+/** Model used for document planning. Falls back to the main model, then default. */
+export function getPlannerModel() {
+  return process.env.OPENAI_MODEL_PLANNER || getOpenAIModel();
+}
+
 export function hasOpenAIKey() {
   return Boolean(process.env.OPENAI_API_KEY);
 }

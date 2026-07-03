@@ -130,6 +130,15 @@ model Document {
   status         DocumentStatus  @default(DRAFT)
   outline        String?
   content        String?
+
+  // Document Planning (Ticket 022): structured, section-by-section plan built
+  // before final generation. All nullable so existing documents are unaffected.
+  documentPlan          Json?
+  documentPlanText      String?
+  documentPlanStatus    String?
+  documentPlanModel     String?
+  documentPlanUpdatedAt DateTime?
+
   resources      Resource[]
   generationRuns GenerationRun[]
   createdAt      DateTime        @default(now())

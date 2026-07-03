@@ -16,6 +16,13 @@ import {
   decodeExtraction,
 } from "../resources/extraction-meta";
 import { SourceBrief } from "../resources/source-brief";
+import {
+  DocumentPlan,
+  documentPlanForPrompt,
+} from "../documents/document-plan";
+
+const asDocumentPlan = (value: unknown): DocumentPlan | null =>
+  value && typeof value === "object" ? (value as DocumentPlan) : null;
 
 export type DocumentGenerationContext = {
   project: Project;
@@ -268,9 +275,31 @@ export function buildDocumentGenerationPrompt(context: DocumentGenerationContext
   );
   const figures = extractFigures(context);
 
+  const plan = asDocumentPlan(
+    (document as { documentPlan?: unknown }).documentPlan
+  );
+  const planStatus = (document as { documentPlanStatus?: string | null })
+    .documentPlanStatus;
+  const usePlan = Boolean(
+    plan &&
+      (planStatus === "ready" || planStatus === "partial") &&
+      plan.sections.length
+  );
+
   return [
     "Produce the final professional document described below, following the Prolific OS house standards you were given.",
     "",
+    usePlan && plan
+      ? [
+          "====================",
+          "DOCUMENT PLAN — AUTHORITATIVE (follow it)",
+          "====================",
+          documentPlanForPrompt(plan),
+          "",
+          "Follow this plan: keep the section structure and order aligned with it; include every specified key figure EXACTLY; use the sources assigned to each section; surface the listed missing information explicitly (never invent it); use tables only where the plan calls for them or where clearly useful; do not add unsupported sections. Turn assumptions and required decisions into polished professional prose — state them once, clearly, rather than repeating 'arbitrage requis' / 'à compléter' throughout.",
+          "",
+        ].join("\n")
+      : "",
     "====================",
     `DOCUMENT-TYPE PLAYBOOK — ${playbook.label}`,
     "====================",
