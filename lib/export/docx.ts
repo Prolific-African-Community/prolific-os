@@ -1,11 +1,19 @@
 import {
+  AlignmentType,
+  BorderStyle,
   Document,
   HeadingLevel,
   LevelFormat,
   Packer,
   Paragraph,
+  ShadingType,
+  Table,
+  TableCell,
+  TableRow,
   TextRun,
+  WidthType,
 } from "docx";
+import { CellAlign, tryParseTable } from "../markdown/table";
 
 const spacing = {
   after: 180,
@@ -54,24 +62,99 @@ const numbered = (text: string) =>
     spacing,
   });
 
-function markdownToParagraphs(markdown: string) {
-  const paragraphs: Paragraph[] = [];
-  const lines = markdown.replace(/\r\n/g, "\n").split("\n");
+const docxAlign = (align: CellAlign) =>
+  align === "right"
+    ? AlignmentType.RIGHT
+    : align === "center"
+    ? AlignmentType.CENTER
+    : AlignmentType.LEFT;
 
-  for (const rawLine of lines) {
-    const line = rawLine.trim();
+const tableCell = (
+  text: string,
+  align: CellAlign,
+  header: boolean
+) =>
+  new TableCell({
+    margins: { top: 60, bottom: 60, left: 90, right: 90 },
+    shading: header
+      ? { type: ShadingType.CLEAR, fill: "F1F2F4", color: "auto" }
+      : undefined,
+    children: [
+      new Paragraph({
+        alignment: docxAlign(align),
+        children: [
+          new TextRun({ text: cleanInlineMarkdown(text), bold: header }),
+        ],
+      }),
+    ],
+  });
+
+const markdownTable = (
+  header: string[],
+  rows: string[][],
+  aligns: CellAlign[]
+) => {
+  const border = { style: BorderStyle.SINGLE, size: 4, color: "D0D3D9" };
+  return new Table({
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    borders: {
+      top: border,
+      bottom: border,
+      left: border,
+      right: border,
+      insideHorizontal: border,
+      insideVertical: border,
+    },
+    rows: [
+      new TableRow({
+        tableHeader: true,
+        children: header.map((cell, i) =>
+          tableCell(cell, aligns[i] || "left", true)
+        ),
+      }),
+      ...rows.map(
+        (row) =>
+          new TableRow({
+            children: row.map((cell, i) =>
+              tableCell(cell, aligns[i] || "left", false)
+            ),
+          })
+      ),
+    ],
+  });
+};
+
+function markdownToBlocks(markdown: string): (Paragraph | Table)[] {
+  const blocks: (Paragraph | Table)[] = [];
+  const lines = markdown.replace(/\r\n/g, "\n").split("\n");
+  let i = 0;
+
+  while (i < lines.length) {
+    const parsedTable = tryParseTable(lines, i);
+    if (parsedTable) {
+      const { table } = parsedTable;
+      blocks.push(markdownTable(table.header, table.rows, table.aligns));
+      blocks.push(new Paragraph({ text: "", spacing: { after: 120 } }));
+      i = parsedTable.next;
+      continue;
+    }
+
+    const line = lines[i].trim();
+    i += 1;
 
     if (!line) {
-      paragraphs.push(new Paragraph({ text: "", spacing: { after: 120 } }));
+      blocks.push(new Paragraph({ text: "", spacing: { after: 120 } }));
+      continue;
+    }
+
+    if (/^(-{3,}|\*{3,}|_{3,})$/.test(line)) {
       continue;
     }
 
     const headingMatch = /^(#{1,3})\s+(.+)$/.exec(line);
-
     if (headingMatch) {
       const [, marks, text] = headingMatch;
-
-      paragraphs.push(
+      blocks.push(
         heading(
           text,
           marks.length === 1
@@ -84,24 +167,22 @@ function markdownToParagraphs(markdown: string) {
       continue;
     }
 
-    const bulletMatch = /^[-*]\s+(.+)$/.exec(line);
-
+    const bulletMatch = /^[-*+]\s+(.+)$/.exec(line);
     if (bulletMatch) {
-      paragraphs.push(bullet(bulletMatch[1]));
+      blocks.push(bullet(bulletMatch[1]));
       continue;
     }
 
     const numberedMatch = /^\d+[.)]\s+(.+)$/.exec(line);
-
     if (numberedMatch) {
-      paragraphs.push(numbered(numberedMatch[1]));
+      blocks.push(numbered(numberedMatch[1]));
       continue;
     }
 
-    paragraphs.push(paragraph(line));
+    blocks.push(paragraph(line));
   }
 
-  return paragraphs.length ? paragraphs : [paragraph(markdown)];
+  return blocks.length ? blocks : [paragraph(markdown)];
 }
 
 export async function markdownToDocxBuffer(markdown: string) {
@@ -132,7 +213,7 @@ export async function markdownToDocxBuffer(markdown: string) {
     sections: [
       {
         properties: {},
-        children: markdownToParagraphs(markdown),
+        children: markdownToBlocks(markdown),
       },
     ],
   });

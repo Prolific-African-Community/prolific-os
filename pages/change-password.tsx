@@ -1,5 +1,9 @@
 import { useState } from "react";
 import { useRouter } from "next/router";
+import Head from "next/head";
+import { LogoMark } from "../components/product/workflow";
+import { Icon } from "../components/ui/icons";
+import { Button, Field, Input } from "../components/ui";
 
 export default function ChangePassword() {
   const router = useRouter();
@@ -27,37 +31,44 @@ export default function ChangePassword() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[#ececf1] px-4 text-black">
-      <div className="w-full max-w-md rounded-[2rem] border border-black/10 bg-white p-8 shadow-[0_12px_35px_rgba(15,23,42,0.05)]">
-        <p className="text-xs font-semibold uppercase tracking-[0.12em] text-blue-500">
-          Secure access
-        </p>
-        <h1 className="mt-3 mb-3 text-2xl font-bold tracking-[-0.04em]">
-          Change your password
-        </h1>
-        <p className="mb-6 text-sm font-medium leading-6 text-black/55">
-          Set a new password before entering your Prolific OS workspace.
-        </p>
+    <>
+      <Head>
+        <title>Set a new password · Prolific OS</title>
+      </Head>
+      <main className="flex min-h-screen items-center justify-center bg-canvas px-4">
+        <div className="w-full max-w-md rounded-3xl border border-line bg-surface p-8 shadow-card md:p-10">
+          <LogoMark />
+          <div className="mt-8 flex h-11 w-11 items-center justify-center rounded-xl bg-accent-50 text-accent-600">
+            <Icon name="lock" size={20} />
+          </div>
+          <h1 className="mt-5 text-2xl font-semibold tracking-tight text-ink">
+            Set a new password
+          </h1>
+          <p className="mt-2 text-sm leading-6 text-ink-muted">
+            Choose a new password before entering your Prolific OS workspace.
+          </p>
 
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <input
-            type="password"
-            placeholder="New password"
-            required
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="w-full rounded-2xl border border-black/10 bg-[#f4f4f7] px-5 py-4 text-sm font-medium text-black outline-none transition placeholder:text-black/30 focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/10"
-          />
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full rounded-full bg-black py-4 text-sm font-semibold text-white shadow-sm transition-all duration-200 hover:-translate-y-px hover:bg-slate-800 hover:shadow-md active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {loading ? "Updating..." : "Update password"}
-          </button>
-        </form>
-      </div>
-    </div>
+          <form onSubmit={handleSubmit} className="mt-7 space-y-4">
+            <Field label="New password">
+              <Input
+                type="password"
+                placeholder="••••••••"
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+            </Field>
+            <Button
+              type="submit"
+              size="lg"
+              loading={loading}
+              className="w-full"
+            >
+              {loading ? "Updating…" : "Update password"}
+            </Button>
+          </form>
+        </div>
+      </main>
+    </>
   );
 }

@@ -2,6 +2,22 @@ import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/router";
 import { AppShell } from "../../../../../components/app-shell";
+import { MarkdownPreview } from "../../../../../components/product/markdown";
+import { Icon, IconName } from "../../../../../components/ui/icons";
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  Field,
+  Input,
+  Select,
+  Skeleton,
+  StatusPill,
+  Textarea,
+  buttonClass,
+  cn,
+} from "../../../../../components/ui";
 
 type DocumentStatus =
   | "DRAFT"
@@ -27,11 +43,7 @@ interface DocumentDetail {
   id: string;
   projectId: string;
   templateId?: string | null;
-  template?: {
-    id: string;
-    name: string;
-    type: string;
-  } | null;
+  template?: { id: string; name: string; type: string } | null;
   title: string;
   type: string;
   objective: string;
@@ -66,26 +78,22 @@ interface GenerationRun {
   updatedAt: string;
 }
 
-const CARD =
-  "rounded-[1.5rem] border border-black/10 bg-white shadow-[0_12px_35px_rgba(15,23,42,0.05)]";
-const INPUT =
-  "w-full rounded-2xl border border-black/10 bg-white px-4 py-3 text-sm font-medium text-black outline-none transition placeholder:text-black/30 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10";
-const TEXTAREA = `${INPUT} min-h-[150px] resize-y leading-6`;
-const CONTENT_TEXTAREA = `${INPUT} min-h-[320px] resize-y font-mono text-[13px] leading-6`;
-const BUTTON_BLUE =
-  "inline-flex items-center justify-center rounded-full bg-blue-500 px-4 py-2.5 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-50";
-const BUTTON_SUBTLE =
-  "inline-flex items-center justify-center rounded-full border border-black/10 px-4 py-2.5 text-xs font-semibold text-black transition hover:border-black hover:bg-black hover:text-white disabled:cursor-not-allowed disabled:opacity-50";
+interface ProjectMeta {
+  id: string;
+  name: string;
+  counts?: { documents: number; knowledgeItems: number; resources: number };
+}
 
 function formatDate(value: string) {
   const date = new Date(value);
-
   return Number.isNaN(date.getTime())
     ? "Unknown"
     : new Intl.DateTimeFormat("en-GB", {
         day: "2-digit",
         month: "short",
         year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
       }).format(date);
 }
 
@@ -107,7 +115,9 @@ export default function DocumentDetailPage() {
     typeof router.query.documentId === "string"
       ? router.query.documentId
       : undefined;
+
   const [document, setDocument] = useState<DocumentDetail | null>(null);
+  const [projectMeta, setProjectMeta] = useState<ProjectMeta | null>(null);
   const [templates, setTemplates] = useState<TemplateRecord[]>([]);
   const [form, setForm] = useState<DocumentDetailForm>(initialForm);
   const [loading, setLoading] = useState(true);
@@ -126,15 +136,15 @@ export default function DocumentDetailPage() {
   const [generationSuccess, setGenerationSuccess] = useState<string | null>(
     null
   );
+  const [view, setView] = useState<"edit" | "preview">("edit");
+  const [showSetup, setShowSetup] = useState(false);
 
   const request = async <T,>(url: string, options: RequestInit = {}) => {
     const token = localStorage.getItem("token");
-
     if (!token) {
       router.replace("/login");
       throw new Error("Your session has expired. Please sign in again.");
     }
-
     const response = await fetch(url, {
       ...options,
       headers: {
@@ -144,16 +154,13 @@ export default function DocumentDetailPage() {
       },
     });
     const payload = (await response.json()) as ApiResponse<T>;
-
     if (response.status === 401) {
       localStorage.removeItem("token");
       router.replace("/login");
     }
-
     if (!response.ok || !payload.success) {
       throw new Error(payload.message || "Unable to complete request");
     }
-
     return payload.data as T;
   };
 
@@ -172,11 +179,19 @@ export default function DocumentDetailPage() {
     }
   };
 
+  const loadProjectMeta = async () => {
+    if (!projectId) return;
+    try {
+      const data = await request<ProjectMeta>(`/api/projects/${projectId}`);
+      setProjectMeta(data);
+    } catch {
+      // Non-fatal: readiness panel just shows less detail.
+    }
+  };
+
   const loadDocument = async () => {
     if (!projectId || !documentId) return;
-
     setError(null);
-
     try {
       const data = await request<DocumentDetail>(
         `/api/projects/${projectId}/documents/${documentId}`
@@ -202,9 +217,7 @@ export default function DocumentDetailPage() {
 
   const loadRuns = async () => {
     if (!projectId || !documentId) return;
-
     setRunsError(null);
-
     try {
       const data = await request<GenerationRun[]>(
         `/api/projects/${projectId}/documents/${documentId}/generation-runs`
@@ -214,7 +227,7 @@ export default function DocumentDetailPage() {
       setRunsError(
         loadError instanceof Error
           ? loadError.message
-          : "Unable to load generation runs"
+          : "Unable to load generation history"
       );
     } finally {
       setRunsLoading(false);
@@ -224,25 +237,21 @@ export default function DocumentDetailPage() {
   useEffect(() => {
     if (!router.isReady || !projectId || !documentId) return;
     loadTemplates();
+    loadProjectMeta();
     loadDocument();
     loadRuns();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router.isReady, projectId, documentId]);
 
   const handleSave = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-
     if (!projectId || !documentId) return;
-
     setSaving(true);
     setError(null);
-
     try {
       const updatedDocument = await request<DocumentDetail>(
         `/api/projects/${projectId}/documents/${documentId}`,
-        {
-          method: "PATCH",
-          body: JSON.stringify(form),
-        }
+        { method: "PATCH", body: JSON.stringify(form) }
       );
       setDocument(updatedDocument);
       setForm({
@@ -265,16 +274,12 @@ export default function DocumentDetailPage() {
 
   const handleCreateRun = async () => {
     if (!projectId || !documentId) return;
-
     setCreatingRun(true);
     setRunsError(null);
-
     try {
       await request<GenerationRun>(
         `/api/projects/${projectId}/documents/${documentId}/generation-runs`,
-        {
-          method: "POST",
-        }
+        { method: "POST" }
       );
       await loadRuns();
     } catch (createError) {
@@ -290,11 +295,9 @@ export default function DocumentDetailPage() {
 
   const handleGenerate = async () => {
     if (!projectId || !documentId) return;
-
     setGenerating(true);
     setRunsError(null);
     setGenerationSuccess(null);
-
     try {
       const result = await request<{
         document: DocumentDetail;
@@ -313,7 +316,10 @@ export default function DocumentDetailPage() {
         content: updatedDocument.content || "",
         templateId: updatedDocument.templateId || "",
       });
-      setGenerationSuccess("Generated Markdown has been saved into the document content.");
+      setGenerationSuccess(
+        "Draft generated and saved to the document content. Review it below."
+      );
+      setView("preview");
       await loadRuns();
     } catch (generateError) {
       setRunsError(
@@ -329,46 +335,30 @@ export default function DocumentDetailPage() {
 
   const handleExport = async (format: "markdown" | "docx" | "pdf") => {
     if (!projectId || !documentId) return;
-
     const token = localStorage.getItem("token");
-
     if (!token) {
       router.replace("/login");
       return;
     }
-
-    if (format === "markdown") {
-      setExportingMarkdown(true);
-    } else if (format === "docx") {
-      setExportingDocx(true);
-    } else {
-      setExportingPdf(true);
-    }
-
+    if (format === "markdown") setExportingMarkdown(true);
+    else if (format === "docx") setExportingDocx(true);
+    else setExportingPdf(true);
     setExportError(null);
-
     try {
       const response = await fetch(
         `/api/projects/${projectId}/documents/${documentId}/export/${format}`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
+        { headers: { Authorization: `Bearer ${token}` } }
       );
-
       if (response.status === 401) {
         localStorage.removeItem("token");
         router.replace("/login");
       }
-
       if (!response.ok) {
         const payload = (await response.json().catch(() => null)) as
           | ApiResponse<unknown>
           | null;
         throw new Error(payload?.message || `Unable to export ${format}`);
       }
-
       const blob = await response.blob();
       const disposition = response.headers.get("Content-Disposition") || "";
       const filenameMatch = disposition.match(/filename="([^"]+)"/);
@@ -377,7 +367,6 @@ export default function DocumentDetailPage() {
         (format === "markdown" ? "document.md" : `document.${format}`);
       const url = window.URL.createObjectURL(blob);
       const link = window.document.createElement("a");
-
       link.href = url;
       link.download = filename;
       window.document.body.appendChild(link);
@@ -391,363 +380,485 @@ export default function DocumentDetailPage() {
           : `Unable to export ${format}`
       );
     } finally {
-      if (format === "markdown") {
-        setExportingMarkdown(false);
-      } else if (format === "docx") {
-        setExportingDocx(false);
-      } else {
-        setExportingPdf(false);
-      }
+      if (format === "markdown") setExportingMarkdown(false);
+      else if (format === "docx") setExportingDocx(false);
+      else setExportingPdf(false);
     }
   };
 
   const hasSavedContent = Boolean(document?.content?.trim());
+  const hasUnsavedContent = form.content !== (document?.content || "");
+  const wordCount = form.content.trim()
+    ? form.content.trim().split(/\s+/).length
+    : 0;
+
+  const readiness: { icon: IconName; label: string; value: string; ok: boolean }[] =
+    [
+      {
+        icon: "knowledge",
+        label: "Knowledge items",
+        value: String(projectMeta?.counts?.knowledgeItems ?? "—"),
+        ok: (projectMeta?.counts?.knowledgeItems ?? 0) > 0,
+      },
+      {
+        icon: "resources",
+        label: "Source resources",
+        value: String(projectMeta?.counts?.resources ?? "—"),
+        ok: (projectMeta?.counts?.resources ?? 0) > 0,
+      },
+      {
+        icon: "templates",
+        label: "Template",
+        value: document?.template?.name || "None",
+        ok: Boolean(document?.templateId),
+      },
+    ];
+
+  const EXPORTS: {
+    format: "markdown" | "docx" | "pdf";
+    label: string;
+    busy: boolean;
+  }[] = [
+    { format: "markdown", label: "Markdown", busy: exportingMarkdown },
+    { format: "docx", label: "Word (DOCX)", busy: exportingDocx },
+    { format: "pdf", label: "PDF", busy: exportingPdf },
+  ];
 
   return (
     <AppShell
-      eyebrow="Document"
+      eyebrow="Document studio"
+      icon="documents"
       title={document?.title || "Document"}
-      description="Manual document workspace for metadata, outline, and draft content."
+      description="Set up, generate, review and export — everything for this document in one place."
+      backHref={projectId ? `/dashboard/projects/${projectId}` : "/dashboard/projects"}
+      backLabel="Back to project"
+      actions={
+        document ? <StatusPill status={document.status} /> : undefined
+      }
     >
-      <div className="mb-4">
-        <Link href={projectId ? `/dashboard/projects/${projectId}` : "/dashboard/projects"}>
-          <a className={BUTTON_SUBTLE}>Back to project</a>
-        </Link>
-      </div>
-
-      {error && (
-        <section className="mb-4 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm font-bold text-red-700">
-          {error}
-        </section>
-      )}
+      {error && <Alert tone="danger" className="mb-6">{error}</Alert>}
 
       {loading ? (
-        <section className={`${CARD} p-6`}>
-          <div className="animate-pulse space-y-3">
-            <div className="h-10 rounded-2xl bg-black/5" />
-            <div className="h-40 rounded-2xl bg-black/5" />
+        <div className="grid gap-6 lg:grid-cols-[1.65fr_1fr]">
+          <Skeleton className="h-[420px]" />
+          <div className="space-y-6">
+            <Skeleton className="h-52" />
+            <Skeleton className="h-40" />
           </div>
-        </section>
+        </div>
       ) : !document ? (
-        <section className={`${CARD} p-10 text-center`}>
-          <p className="text-lg font-semibold">Document not found.</p>
-          <p className="mt-3 text-sm font-medium text-black/55">
+        <Card className="p-10 text-center">
+          <p className="text-lg font-semibold text-ink">Document not found</p>
+          <p className="mt-2 text-sm text-ink-muted">
             The document may have been removed or belongs to another project.
           </p>
-        </section>
+        </Card>
       ) : (
-        <>
-          <section className={`${CARD} p-6`}>
-            <div className="flex flex-wrap gap-2 text-xs font-semibold text-black/50">
-              <span className="rounded-full bg-black px-3 py-1 text-white">
-                {document.status}
-              </span>
-              <span className="rounded-full bg-black/5 px-3 py-1">
-                {document.type}
-              </span>
-              <span className="rounded-full bg-black/5 px-3 py-1">
-                {document.template?.name || "No template"}
-              </span>
-            </div>
-            <div className="mt-5 flex flex-wrap gap-4 text-xs font-medium text-black/45">
-              <span>Created {formatDate(document.createdAt)}</span>
-              <span>Updated {formatDate(document.updatedAt)}</span>
-            </div>
-          </section>
+        <form onSubmit={handleSave}>
+          <div className="grid gap-6 lg:grid-cols-[1.65fr_1fr]">
+            {/* Main: editor + setup */}
+            <div className="space-y-6">
+              <Card className="overflow-hidden">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-3.5">
+                  <div className="inline-flex rounded-xl border border-line bg-canvas p-1">
+                    <button
+                      type="button"
+                      onClick={() => setView("edit")}
+                      className={cn(
+                        "flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all",
+                        view === "edit"
+                          ? "bg-surface text-ink shadow-soft"
+                          : "text-ink-muted hover:text-ink"
+                      )}
+                    >
+                      <Icon name="edit" size={14} />
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setView("preview")}
+                      className={cn(
+                        "flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all",
+                        view === "preview"
+                          ? "bg-surface text-ink shadow-soft"
+                          : "text-ink-muted hover:text-ink"
+                      )}
+                    >
+                      <Icon name="documents" size={14} />
+                      Preview
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs font-medium text-ink-faint">
+                      {wordCount} words
+                      {hasUnsavedContent && (
+                        <span className="ml-2 text-amber-600">• Unsaved</span>
+                      )}
+                    </span>
+                    <Button type="submit" size="sm" loading={saving} icon="check">
+                      Save
+                    </Button>
+                  </div>
+                </div>
 
-          <section className={`${CARD} mt-4 p-6`}>
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-blue-500">
-                  Generation runs
+                <div className="p-5">
+                  {view === "edit" ? (
+                    <Textarea
+                      value={form.content}
+                      onChange={(event) =>
+                        setForm((current) => ({
+                          ...current,
+                          content: event.target.value,
+                        }))
+                      }
+                      placeholder="Write or paste your document content here — or generate a first draft from the panel on the right. Markdown is supported."
+                      className="min-h-[440px] border-0 font-mono text-[13px] leading-6 shadow-none focus:ring-0 focus:ring-offset-0"
+                    />
+                  ) : form.content.trim() ? (
+                    <div className="min-h-[440px] max-h-[640px] overflow-auto rounded-xl bg-ink/[0.015] p-6">
+                      <MarkdownPreview content={form.content} />
+                    </div>
+                  ) : (
+                    <div className="flex min-h-[440px] flex-col items-center justify-center rounded-xl border border-dashed border-line bg-ink/[0.015] text-center">
+                      <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent-50 text-accent-600">
+                        <Icon name="documents" size={24} />
+                      </div>
+                      <p className="mt-4 text-base font-semibold text-ink">
+                        No content yet
+                      </p>
+                      <p className="mt-1.5 max-w-sm text-sm leading-6 text-ink-muted">
+                        Generate a first draft from the panel on the right, or
+                        switch to Edit and start writing.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </Card>
+
+              {/* Setup */}
+              <Card className="p-6">
+                <button
+                  type="button"
+                  onClick={() => setShowSetup((v) => !v)}
+                  className="flex w-full items-center justify-between"
+                >
+                  <span className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-accent-600">
+                    <Icon name="info" size={14} />
+                    Document setup
+                  </span>
+                  <Icon
+                    name={showSetup ? "chevron-down" : "chevron-right"}
+                    size={16}
+                    className="text-ink-muted"
+                  />
+                </button>
+
+                {!showSetup && (
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <Badge tone="neutral">{document.type}</Badge>
+                    <Badge tone="accent" icon="templates">
+                      {document.template?.name || "No template"}
+                    </Badge>
+                    <span className="text-xs font-medium text-ink-faint">
+                      Objective: {document.objective.slice(0, 80)}
+                      {document.objective.length > 80 ? "…" : ""}
+                    </span>
+                  </div>
+                )}
+
+                {showSetup && (
+                  <div className="mt-5 grid gap-4 animate-fade-up">
+                    <div className="grid gap-4 md:grid-cols-[1fr_180px_220px]">
+                      <Field label="Title">
+                        <Input
+                          value={form.title}
+                          onChange={(event) =>
+                            setForm((current) => ({
+                              ...current,
+                              title: event.target.value,
+                            }))
+                          }
+                          required
+                        />
+                      </Field>
+                      <Field label="Type">
+                        <Input
+                          value={form.type}
+                          onChange={(event) =>
+                            setForm((current) => ({
+                              ...current,
+                              type: event.target.value,
+                            }))
+                          }
+                          required
+                        />
+                      </Field>
+                      <Field label="Template">
+                        <Select
+                          value={form.templateId}
+                          onChange={(event) =>
+                            setForm((current) => ({
+                              ...current,
+                              templateId: event.target.value,
+                            }))
+                          }
+                          disabled={templatesLoading}
+                        >
+                          <option value="">No template</option>
+                          {templates.map((template) => (
+                            <option key={template.id} value={template.id}>
+                              {template.name}
+                            </option>
+                          ))}
+                        </Select>
+                      </Field>
+                    </div>
+                    <Field label="Objective">
+                      <Textarea
+                        value={form.objective}
+                        onChange={(event) =>
+                          setForm((current) => ({
+                            ...current,
+                            objective: event.target.value,
+                          }))
+                        }
+                        className="min-h-[100px]"
+                        required
+                      />
+                    </Field>
+                    <Field label="Instructions">
+                      <Textarea
+                        value={form.instructions}
+                        onChange={(event) =>
+                          setForm((current) => ({
+                            ...current,
+                            instructions: event.target.value,
+                          }))
+                        }
+                        className="min-h-[100px]"
+                        placeholder="Optional tone, structure, constraints, or source priorities."
+                      />
+                    </Field>
+                    <Field label="Outline">
+                      <Textarea
+                        value={form.outline}
+                        onChange={(event) =>
+                          setForm((current) => ({
+                            ...current,
+                            outline: event.target.value,
+                          }))
+                        }
+                        className="min-h-[100px]"
+                        placeholder="Draft the document outline (optional)."
+                      />
+                    </Field>
+                    <div>
+                      <Button type="submit" loading={saving} icon="check">
+                        Save setup
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </Card>
+            </div>
+
+            {/* Side panel */}
+            <div className="space-y-6 lg:sticky lg:top-6 lg:self-start">
+              {/* Generate */}
+              <Card className="p-6">
+                <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-accent-600">
+                  <Icon name="generate" size={14} />
+                  Generate with AI
+                </div>
+                <p className="mt-2 text-sm leading-6 text-ink-muted">
+                  We&apos;ll use this project&apos;s context to draft the
+                  document. Review before generating.
                 </p>
-                <h2 className="mt-3 text-xl font-semibold tracking-[-0.04em]">
-                  Generation context history
-                </h2>
-                <p className="mt-2 max-w-2xl text-sm font-medium leading-6 text-black/55">
-                  Prepare and review the exact project, template, knowledge, and
-                  resource context that future AI generation will use. Real AI
-                  generation is not enabled yet.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={handleCreateRun}
-                disabled={creatingRun || generating}
-                className={BUTTON_SUBTLE}
-              >
-                {creatingRun ? "Preparing..." : "Prepare context"}
-              </button>
-              <button
-                type="button"
-                onClick={handleGenerate}
-                disabled={generating || creatingRun}
-                className={BUTTON_BLUE}
-              >
-                {generating ? "Generating..." : "Generate document"}
-              </button>
-            </div>
 
-            {generationSuccess && (
-              <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm font-bold text-emerald-700">
-                {generationSuccess}
-              </div>
-            )}
-
-            {runsError && (
-              <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm font-bold text-red-700">
-                {runsError}
-              </div>
-            )}
-
-            <div className="mt-6">
-              {runsLoading ? (
-                <div className="animate-pulse space-y-3">
-                  {Array.from({ length: 2 }).map((_, index) => (
-                    <div key={index} className="h-28 rounded-2xl bg-black/5" />
+                <div className="mt-4 space-y-2">
+                  {readiness.map((r) => (
+                    <div
+                      key={r.label}
+                      className="flex items-center justify-between rounded-xl bg-ink/[0.03] px-3.5 py-2.5"
+                    >
+                      <span className="flex items-center gap-2 text-sm font-medium text-ink-soft">
+                        <Icon
+                          name={r.icon}
+                          size={16}
+                          className="text-ink-muted"
+                        />
+                        {r.label}
+                      </span>
+                      <span
+                        className={cn(
+                          "flex items-center gap-1.5 text-sm font-semibold",
+                          r.ok ? "text-emerald-600" : "text-ink-faint"
+                        )}
+                      >
+                        {r.value}
+                        {r.ok && <Icon name="check" size={14} />}
+                      </span>
+                    </div>
                   ))}
                 </div>
-              ) : !runs.length ? (
-                <div className="rounded-2xl border border-dashed border-black/15 bg-black/[0.02] p-8 text-center">
-                  <p className="text-sm font-semibold">
-                    No generation runs yet.
-                  </p>
-                  <p className="mx-auto mt-2 max-w-xl text-sm font-medium leading-6 text-black/55">
-                    Prepare the first context preview before real generation is
-                    connected.
-                  </p>
+
+                {generationSuccess && (
+                  <Alert tone="success" className="mt-4">
+                    {generationSuccess}
+                  </Alert>
+                )}
+                {runsError && (
+                  <Alert tone="danger" className="mt-4">
+                    {runsError}
+                  </Alert>
+                )}
+
+                {generating && (
+                  <div className="mt-4 flex items-center gap-3 rounded-xl border border-accent-200 bg-accent-50 px-4 py-3">
+                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-accent-500 border-t-transparent" />
+                    <span className="text-sm font-medium text-accent-700">
+                      Generating your draft…
+                    </span>
+                  </div>
+                )}
+
+                <div className="mt-5 flex flex-col gap-2">
+                  <Button
+                    type="button"
+                    onClick={handleGenerate}
+                    loading={generating}
+                    disabled={creatingRun}
+                    icon="generate"
+                    className="w-full"
+                  >
+                    {generating ? "Generating…" : "Generate document"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={handleCreateRun}
+                    loading={creatingRun}
+                    disabled={generating}
+                    icon="layers"
+                    className="w-full"
+                  >
+                    {creatingRun ? "Preparing…" : "Preview context only"}
+                  </Button>
                 </div>
-              ) : (
-                <div className="space-y-4">
-                  {runs.map((run) => (
-                    <article
-                      key={run.id}
-                      className="rounded-2xl border border-black/10 bg-black/[0.02] p-5"
+              </Card>
+
+              {/* Export */}
+              <Card className="p-6">
+                <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-accent-600">
+                  <Icon name="export" size={14} />
+                  Export
+                </div>
+                <p className="mt-2 text-sm leading-6 text-ink-muted">
+                  Exports use the latest saved content.
+                </p>
+
+                {exportError && (
+                  <Alert tone="danger" className="mt-4">
+                    {exportError}
+                  </Alert>
+                )}
+
+                <div className="mt-4 space-y-2">
+                  {EXPORTS.map((exp) => (
+                    <button
+                      key={exp.format}
+                      type="button"
+                      onClick={() => handleExport(exp.format)}
+                      disabled={exp.busy || !hasSavedContent}
+                      className="group flex w-full items-center justify-between rounded-xl border border-line px-4 py-3 text-left transition-all duration-200 hover:border-accent-300 hover:bg-accent-50/40 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-line disabled:hover:bg-transparent"
                     >
-                      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                        <div>
-                          <div className="flex flex-wrap gap-2 text-xs font-semibold text-black/50">
-                            <span className="rounded-full bg-black px-3 py-1 text-white">
-                              {run.status}
-                            </span>
-                            <span className="rounded-full bg-white px-3 py-1">
-                              {run.provider}
-                            </span>
-                            <span className="rounded-full bg-white px-3 py-1">
-                              {run.model}
+                      <span className="flex items-center gap-2.5">
+                        <Icon
+                          name="download"
+                          size={16}
+                          className="text-ink-muted"
+                        />
+                        <span className="text-sm font-semibold text-ink">
+                          {exp.label}
+                        </span>
+                      </span>
+                      {exp.busy ? (
+                        <span className="h-4 w-4 animate-spin rounded-full border-2 border-accent-500 border-t-transparent" />
+                      ) : hasSavedContent ? (
+                        <Badge tone="success">Ready</Badge>
+                      ) : (
+                        <Badge tone="neutral">No content</Badge>
+                      )}
+                    </button>
+                  ))}
+                </div>
+
+                <p className="mt-4 text-xs text-ink-faint">
+                  {hasSavedContent
+                    ? `Last saved ${formatDate(document.updatedAt)}`
+                    : "Generate or write content, then save to enable exports."}
+                </p>
+              </Card>
+
+              {/* History */}
+              <Card className="p-6">
+                <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-accent-600">
+                  <Icon name="clock" size={14} />
+                  Generation history
+                </div>
+
+                <div className="mt-4">
+                  {runsLoading ? (
+                    <div className="space-y-2">
+                      {Array.from({ length: 2 }).map((_, i) => (
+                        <Skeleton key={i} className="h-16" />
+                      ))}
+                    </div>
+                  ) : !runs.length ? (
+                    <p className="rounded-xl border border-dashed border-line bg-ink/[0.015] px-4 py-6 text-center text-sm text-ink-muted">
+                      No runs yet. Generate or preview context to see the history
+                      here.
+                    </p>
+                  ) : (
+                    <div className="space-y-3">
+                      {runs.map((run) => (
+                        <div
+                          key={run.id}
+                          className="rounded-xl border border-line bg-ink/[0.015] p-4"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <StatusPill status={run.status} />
+                            <span className="text-xs font-medium text-ink-faint">
+                              {formatDate(run.createdAt)}
                             </span>
                           </div>
-                          <p className="mt-3 text-xs font-medium text-black/40">
-                            Created {formatDate(run.createdAt)}
+                          <p className="mt-2 text-xs font-medium text-ink-muted">
+                            {run.provider} · {run.model}
                           </p>
+                          {run.error && (
+                            <Alert tone="danger" className="mt-3">
+                              {run.error}
+                            </Alert>
+                          )}
+                          {run.inputSummary && (
+                            <details className="mt-3 group">
+                              <summary className="cursor-pointer text-xs font-semibold text-accent-600 hover:text-accent-700">
+                                View context used
+                              </summary>
+                              <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap rounded-lg bg-surface p-3 text-[11px] leading-5 text-ink-soft">
+                                {run.inputSummary}
+                              </pre>
+                            </details>
+                          )}
                         </div>
-                      </div>
-                      <pre className="mt-4 max-h-[420px] overflow-auto whitespace-pre-wrap rounded-2xl bg-white p-4 text-xs font-medium leading-6 text-black/70">
-                        {run.inputSummary || "No input summary saved."}
-                      </pre>
-                      {run.output && (
-                        <div className="mt-4">
-                          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-black/45">
-                            Output preview
-                          </p>
-                          <pre className="mt-2 max-h-[260px] overflow-auto whitespace-pre-wrap rounded-2xl bg-white p-4 text-xs font-medium leading-6 text-black/70">
-                            {run.output.length > 3000
-                              ? `${run.output.slice(0, 3000)}...`
-                              : run.output}
-                          </pre>
-                        </div>
-                      )}
-                      {run.error && (
-                        <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm font-bold text-red-700">
-                          {run.error}
-                        </div>
-                      )}
-                    </article>
-                  ))}
+                      ))}
+                    </div>
+                  )}
                 </div>
-              )}
+              </Card>
             </div>
-          </section>
-
-          <form className="mt-4 grid gap-4" onSubmit={handleSave}>
-            <section className={`${CARD} p-6`}>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-blue-500">
-                Metadata
-              </p>
-              <div className="mt-5 grid gap-4 md:grid-cols-[1fr_220px_260px]">
-                <label className="block">
-                  <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.14em] text-black/45">
-                    Title
-                  </span>
-                  <input
-                    value={form.title}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        title: event.target.value,
-                      }))
-                    }
-                    className={INPUT}
-                    required
-                  />
-                </label>
-                <label className="block">
-                  <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.14em] text-black/45">
-                    Type
-                  </span>
-                  <input
-                    value={form.type}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        type: event.target.value,
-                      }))
-                    }
-                    className={INPUT}
-                    required
-                  />
-                </label>
-                <label className="block">
-                  <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.14em] text-black/45">
-                    Template
-                  </span>
-                  <select
-                    value={form.templateId}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        templateId: event.target.value,
-                      }))
-                    }
-                    className={INPUT}
-                    disabled={templatesLoading}
-                  >
-                    <option value="">No template</option>
-                    {templates.map((template) => (
-                      <option key={template.id} value={template.id}>
-                        {template.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-              <label className="mt-4 block">
-                <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.14em] text-black/45">
-                  Objective
-                </span>
-                <textarea
-                  value={form.objective}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      objective: event.target.value,
-                    }))
-                  }
-                  className={TEXTAREA}
-                  required
-                />
-              </label>
-              <label className="mt-4 block">
-                <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.14em] text-black/45">
-                  Instructions
-                </span>
-                <textarea
-                  value={form.instructions}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      instructions: event.target.value,
-                    }))
-                  }
-                  className={TEXTAREA}
-                />
-              </label>
-            </section>
-
-            <section className={`${CARD} p-6`}>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-blue-500">
-                Outline
-              </p>
-              <textarea
-                value={form.outline}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    outline: event.target.value,
-                  }))
-                }
-                className={`${TEXTAREA} mt-5`}
-                placeholder="Draft the document outline manually."
-              />
-            </section>
-
-            <section className={`${CARD} p-6`}>
-              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-blue-500">
-                    Content
-                  </p>
-                  <p className="mt-2 text-sm font-medium leading-6 text-black/55">
-                    Export uses the latest saved document content.
-                  </p>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => handleExport("markdown")}
-                    disabled={exportingMarkdown || !hasSavedContent}
-                    className={BUTTON_SUBTLE}
-                  >
-                    {exportingMarkdown ? "Exporting..." : "Export Markdown"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleExport("docx")}
-                    disabled={exportingDocx || !hasSavedContent}
-                    className={BUTTON_SUBTLE}
-                  >
-                    {exportingDocx ? "Exporting..." : "Export DOCX"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleExport("pdf")}
-                    disabled={exportingPdf || !hasSavedContent}
-                    className={BUTTON_SUBTLE}
-                  >
-                    {exportingPdf ? "Exporting..." : "Export PDF"}
-                  </button>
-                </div>
-              </div>
-              {!hasSavedContent && (
-                <p className="mt-4 text-sm font-semibold text-black/45">
-                  Generate or write content before exporting.
-                </p>
-              )}
-              {exportError && (
-                <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm font-bold text-red-700">
-                  {exportError}
-                </div>
-              )}
-              <textarea
-                value={form.content}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    content: event.target.value,
-                  }))
-                }
-                className={`${CONTENT_TEXTAREA} mt-5`}
-                placeholder="Write or paste draft content here."
-              />
-            </section>
-
-            <div>
-              <button type="submit" disabled={saving} className={BUTTON_BLUE}>
-                {saving ? "Saving..." : "Save document"}
-              </button>
-            </div>
-          </form>
-        </>
+          </div>
+        </form>
       )}
     </AppShell>
   );

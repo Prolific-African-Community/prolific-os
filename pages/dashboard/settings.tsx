@@ -4,8 +4,10 @@ export default function SettingsPage() {
   return (
     <PlaceholderPage
       eyebrow="Workspace"
+      icon="settings"
       title="Settings"
-      description="Workspace settings will be introduced once the core flow is stable."
+      description="Manage your workspace preferences and account security."
+      note="Workspace settings are on the roadmap. You can update your password from the change-password screen today."
     />
   );
 }

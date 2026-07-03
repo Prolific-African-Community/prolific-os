@@ -2,6 +2,7 @@ import { DocumentStatus, GenerationRunStatus } from "@prisma/client";
 import type { NextApiResponse } from "next";
 import {
   buildDocumentGenerationPrompt,
+  buildDocumentSystemInstructions,
   buildGenerationInputSummary,
 } from "../../../../../../lib/ai/document-generation";
 import { generateTextWithOpenAI, getOpenAIModel } from "../../../../../../lib/ai/openai";
@@ -142,7 +143,9 @@ export default withAuth(
       });
 
       const prompt = buildDocumentGenerationPrompt(context);
-      const generated = await generateTextWithOpenAI(prompt);
+      const generated = await generateTextWithOpenAI(prompt, {
+        instructions: buildDocumentSystemInstructions(),
+      });
       const [updatedDocument, updatedRun] = await prisma.$transaction([
         prisma.document.update({
           where: { id: documentId },

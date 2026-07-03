@@ -1,67 +1,52 @@
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/router";
-import { LogoMark } from "../components/app-shell";
+import Head from "next/head";
+import Link from "next/link";
+import { LogoMark } from "../components/product/workflow";
+import { Icon, IconName } from "../components/ui/icons";
+import { Button, Field, Input, Label, Alert } from "../components/ui";
 
-type ClassValue = string | false | null | undefined;
-const cn = (...c: ClassValue[]) => c.filter(Boolean).join(" ");
+const HIGHLIGHTS: { icon: IconName; label: string }[] = [
+  { icon: "knowledge", label: "Reusable project memory" },
+  { icon: "generate", label: "AI-assisted drafting" },
+  { icon: "export", label: "Markdown, DOCX & PDF export" },
+];
 
 function LoginVisual() {
-  const pixels = Array.from({ length: 64 });
-
   return (
-    <div className="relative hidden min-h-[620px] overflow-hidden rounded-[2.5rem] bg-black p-10 text-white lg:block">
-      <div className="relative z-10">
-        <div className="inline-flex rounded-full border border-white/15 px-4 py-2 text-xs font-semibold text-white/70">
-          Secure access
-        </div>
+    <div className="relative hidden overflow-hidden rounded-3xl bg-ink p-10 text-white lg:flex lg:flex-col lg:justify-between">
+      <div className="pointer-events-none absolute right-[-6rem] top-[-6rem] h-72 w-72 rounded-full bg-accent-500/25 blur-3xl" />
+      <div className="pointer-events-none absolute bottom-[-7rem] left-[-6rem] h-72 w-72 rounded-full bg-accent-400/15 blur-3xl" />
 
-        <h2 className="mt-8 max-w-sm text-[3rem] font-bold leading-[0.98] tracking-[-0.05em]">
+      <div className="relative z-10">
+        <div className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/[0.04] px-3.5 py-1.5 text-xs font-semibold text-white/70">
+          <Icon name="shield" size={14} className="text-accent-300" />
+          Secure controlled access
+        </div>
+        <h2 className="mt-9 max-w-sm text-[2.75rem] font-semibold leading-[1.03] tracking-[-0.03em]">
           Structured work starts here.
         </h2>
-
-        <p className="mt-6 max-w-sm text-sm font-medium leading-7 text-white/50">
-          Access your private AI workspace for projects, knowledge, templates,
-          and professional deliverables.
+        <p className="mt-5 max-w-sm text-sm leading-7 text-white/55">
+          Your private AI workspace for projects, knowledge, source material and
+          professional deliverables.
         </p>
       </div>
 
-      <div className="absolute bottom-12 left-10 right-10 z-10 rounded-[2rem] border border-white/10 bg-white/[0.04] p-6 backdrop-blur">
-        <div className="flex items-center justify-between text-xs text-white/50">
-          <span>Workspace visibility</span>
-          <span className="text-blue-300">Live</span>
-        </div>
-
-        <div className="mt-6 grid grid-cols-8 gap-2">
-          {pixels.map((_, i) => {
-            const color =
-              i % 13 === 0
-                ? "bg-white"
-                : i % 9 === 0
-                ? "bg-sky-300"
-                : i % 5 === 0
-                ? "bg-blue-400"
-                : "bg-blue-700";
-
-            return (
-              <span
-                key={i}
-                className={cn(
-                  "h-4 rounded-[4px]",
-                  color,
-                  i % 7 === 0 ? "col-span-2" : "col-span-1"
-                )}
-              />
-            );
-          })}
-        </div>
+      <div className="relative z-10 space-y-3">
+        {HIGHLIGHTS.map((item) => (
+          <div
+            key={item.label}
+            className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.05] px-4 py-3.5 backdrop-blur"
+          >
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/10 text-accent-300">
+              <Icon name={item.icon} size={18} />
+            </span>
+            <span className="text-sm font-medium text-white/85">
+              {item.label}
+            </span>
+          </div>
+        ))}
       </div>
-
-      <div className="absolute right-[-5rem] top-[-5rem] h-64 w-64 rounded-full bg-blue-500/30 blur-3xl" />
-      <div className="absolute bottom-[-6rem] left-[-6rem] h-72 w-72 rounded-full bg-sky-400/20 blur-3xl" />
-
-      <div className="absolute right-14 top-16 h-24 w-24 rounded-[1.75rem] bg-blue-500" />
-      <div className="absolute right-28 top-44 h-16 w-16 rounded-[1.25rem] bg-sky-300" />
-      <div className="absolute right-12 top-64 h-10 w-10 rounded-xl bg-white" />
     </div>
   );
 }
@@ -121,93 +106,87 @@ export default function LoginPage() {
   };
 
   return (
-    <main className="min-h-screen bg-[#ececf1] px-4 py-6 text-black md:px-6">
-      <div className="mx-auto flex min-h-[calc(100vh-3rem)] max-w-7xl items-center">
-        <div className="grid w-full gap-8 lg:grid-cols-[0.9fr_1.1fr]">
-          {/* LEFT LOGIN CARD */}
-          <section className="flex items-center">
-            <div className="w-full rounded-[2rem] border border-black/10 bg-white p-7 shadow-[0_12px_35px_rgba(15,23,42,0.05)] md:p-10">
-              <div className="flex items-center justify-between">
-                <LogoMark />
-
-                <a
-                  href="/"
-                  className="rounded-full border border-black/15 px-4 py-2 text-xs font-semibold text-black no-underline transition-all duration-200 hover:-translate-y-px hover:bg-black hover:text-white"
-                >
-                  Home
-                </a>
-              </div>
-
-              <div className="mt-16">
-                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-blue-500">
-                  Private AI workspace
-                </p>
-
-                <h1 className="mt-4 max-w-sm text-[2.6rem] font-bold leading-[0.98] tracking-[-0.05em] text-black md:text-[3.6rem]">
-                  Sign in to Prolific OS
-                </h1>
-
-                <p className="mt-6 max-w-sm text-sm font-medium leading-7 text-black/60">
-                  Access your structured workspace for projects, resources,
-                  templates, and deliverables.
-                </p>
-              </div>
-
-              <form onSubmit={handleSubmit} className="mt-10 space-y-5">
-                <div>
-                  <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-black/50">
-                    Email
-                  </label>
-                  <input
-                    type="email"
-                    required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="you@company.com"
-                    className="w-full rounded-2xl border border-black/10 bg-[#f4f4f7] px-5 py-4 text-sm font-medium text-black outline-none transition placeholder:text-black/30 focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/10"
-                  />
+    <>
+      <Head>
+        <title>Sign in · Prolific OS</title>
+      </Head>
+      <main className="min-h-screen bg-canvas px-4 py-6 md:px-6">
+        <div className="mx-auto flex min-h-[calc(100vh-3rem)] max-w-6xl items-center">
+          <div className="grid w-full gap-6 lg:grid-cols-[1fr_1.05fr]">
+            {/* Login card */}
+            <section className="flex items-center">
+              <div className="w-full rounded-3xl border border-line bg-surface p-7 shadow-card md:p-10">
+                <div className="flex items-center justify-between">
+                  <LogoMark />
+                  <Link href="/">
+                    <a className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-ink-muted transition-colors hover:text-ink">
+                      <Icon
+                        name="chevron-right"
+                        size={14}
+                        className="rotate-180"
+                      />
+                      Home
+                    </a>
+                  </Link>
                 </div>
 
-                <div>
-                  <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-black/50">
-                    Password
-                  </label>
-                  <input
-                    type="password"
-                    required
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="••••••••"
-                    className="w-full rounded-2xl border border-black/10 bg-[#f4f4f7] px-5 py-4 text-sm font-medium text-black outline-none transition placeholder:text-black/30 focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/10"
-                  />
+                <div className="mt-14">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-accent-600">
+                    Private AI workspace
+                  </p>
+                  <h1 className="mt-4 text-[2.4rem] font-semibold leading-[1.05] tracking-[-0.03em] text-ink md:text-[3rem]">
+                    Welcome back
+                  </h1>
+                  <p className="mt-4 max-w-sm text-sm leading-7 text-ink-muted">
+                    Sign in to your structured workspace for projects,
+                    knowledge, resources and deliverables.
+                  </p>
                 </div>
 
-                {error && (
-                  <div className="rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm font-medium text-red-600">
-                    {error}
-                  </div>
-                )}
+                <form onSubmit={handleSubmit} className="mt-9 space-y-4">
+                  <Field label="Email">
+                    <Input
+                      type="email"
+                      required
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="you@company.com"
+                    />
+                  </Field>
+                  <Field label="Password">
+                    <Input
+                      type="password"
+                      required
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="••••••••"
+                    />
+                  </Field>
 
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="flex w-full items-center justify-center rounded-full bg-blue-500 px-6 py-4 text-sm font-semibold text-white shadow-sm transition-all duration-200 hover:-translate-y-px hover:bg-blue-600 hover:shadow-md active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {isSubmitting ? "Signing in..." : "Sign in ↗"}
-                </button>
-              </form>
+                  {error && <Alert tone="danger">{error}</Alert>}
 
-              <div className="mt-8 flex flex-wrap items-center justify-between gap-4 text-xs font-medium text-black/45">
-                <span>Secure controlled access</span>
-                <span>Validated workspace flow</span>
+                  <Button
+                    type="submit"
+                    size="lg"
+                    loading={isSubmitting}
+                    iconRight={isSubmitting ? undefined : "arrow-right"}
+                    className="w-full"
+                  >
+                    {isSubmitting ? "Signing in…" : "Sign in"}
+                  </Button>
+                </form>
+
+                <div className="mt-8 flex items-center gap-2 text-xs font-medium text-ink-faint">
+                  <Icon name="lock" size={14} />
+                  Secure, controlled access · Validated workspace flow
+                </div>
               </div>
-            </div>
-          </section>
+            </section>
 
-          {/* RIGHT VISUAL */}
-          <LoginVisual />
+            <LoginVisual />
+          </div>
         </div>
-      </div>
-    </main>
+      </main>
+    </>
   );
 }

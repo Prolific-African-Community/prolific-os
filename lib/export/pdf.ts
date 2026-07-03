@@ -1,4 +1,5 @@
 import PDFDocument from "pdfkit";
+import { CellAlign, MarkdownTable, tryParseTable } from "../markdown/table";
 
 const cleanInlineMarkdown = (value: string) =>
   value
@@ -77,6 +78,72 @@ const writeNumbered = (
     });
 };
 
+const pdfAlign = (align: CellAlign): "left" | "center" | "right" => align;
+
+const writeTable = (document: PDFKit.PDFDocument, table: MarkdownTable) => {
+  const startX = document.page.margins.left;
+  const usableWidth =
+    document.page.width -
+    document.page.margins.left -
+    document.page.margins.right;
+  const colCount = table.header.length || 1;
+  const colWidth = usableWidth / colCount;
+  const padX = 6;
+  const padY = 5;
+  const fontSize = 9.5;
+  const bottomLimit = document.page.height - document.page.margins.bottom;
+
+  const drawRow = (cells: string[], header: boolean) => {
+    document.font(header ? "Helvetica-Bold" : "Helvetica").fontSize(fontSize);
+
+    const heights = cells.map((cell) =>
+      document.heightOfString(cleanInlineMarkdown(cell) || " ", {
+        width: colWidth - padX * 2,
+      })
+    );
+    const rowHeight = Math.max(...heights, fontSize) + padY * 2;
+
+    if (document.y + rowHeight > bottomLimit) {
+      document.addPage();
+    }
+
+    const y = document.y;
+
+    if (header) {
+      document
+        .rect(startX, y, usableWidth, rowHeight)
+        .fill("#f1f2f4");
+    }
+
+    cells.forEach((cell, index) => {
+      const x = startX + index * colWidth;
+      document.lineWidth(0.5).strokeColor("#d0d3d9");
+      document.rect(x, y, colWidth, rowHeight).stroke();
+      document
+        .font(header ? "Helvetica-Bold" : "Helvetica")
+        .fontSize(fontSize)
+        .fillColor("#111111")
+        .text(cleanInlineMarkdown(cell), x + padX, y + padY, {
+          width: colWidth - padX * 2,
+          align: pdfAlign(table.aligns[index] || "left"),
+        });
+    });
+
+    document.x = startX;
+    document.y = y + rowHeight;
+  };
+
+  document.moveDown(0.3);
+  drawRow(table.header, true);
+  for (const row of table.rows) {
+    const padded = [...row];
+    while (padded.length < colCount) padded.push("");
+    drawRow(padded.slice(0, colCount), false);
+  }
+  document.x = startX;
+  document.moveDown(0.6);
+};
+
 export async function markdownToPdfBuffer(markdown: string) {
   return new Promise<Buffer>((resolve, reject) => {
     const chunks: Buffer[] = [];
@@ -96,11 +163,28 @@ export async function markdownToPdfBuffer(markdown: string) {
     document.on("end", () => resolve(Buffer.concat(chunks)));
     document.on("error", reject);
 
-    for (const rawLine of markdown.replace(/\r\n/g, "\n").split("\n")) {
-      const line = rawLine.trim();
+    const lines = markdown.replace(/\r\n/g, "\n").split("\n");
+    let li = 0;
+
+    while (li < lines.length) {
+      const parsedTable = tryParseTable(lines, li);
+      if (parsedTable) {
+        writeTable(document, parsedTable.table);
+        numberedIndex = 1;
+        li = parsedTable.next;
+        continue;
+      }
+
+      const line = lines[li].trim();
+      li += 1;
 
       if (!line) {
         document.moveDown(0.5);
+        numberedIndex = 1;
+        continue;
+      }
+
+      if (/^(-{3,}|\*{3,}|_{3,})$/.test(line)) {
         numberedIndex = 1;
         continue;
       }

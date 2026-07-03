@@ -1,7 +1,20 @@
 import Link from "next/link";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/router";
 import { AppShell } from "../../components/app-shell";
+import { Icon } from "../../components/ui/icons";
+import {
+  Alert,
+  Button,
+  Card,
+  EmptyState,
+  Field,
+  Input,
+  Skeleton,
+  StatusPill,
+  Textarea,
+  buttonClass,
+} from "../../components/ui";
 
 type ProjectStatus = "ACTIVE" | "ARCHIVED";
 
@@ -12,6 +25,7 @@ interface ProjectRecord {
   status: ProjectStatus;
   createdAt: string;
   updatedAt: string;
+  counts?: { documents: number; knowledgeItems: number; resources: number };
 }
 
 interface ApiResponse<T> {
@@ -25,25 +39,10 @@ interface ProjectForm {
   description: string;
 }
 
-const CARD =
-  "rounded-[1.5rem] border border-black/10 bg-white shadow-[0_12px_35px_rgba(15,23,42,0.05)]";
-const INPUT =
-  "w-full rounded-2xl border border-black/10 bg-white px-4 py-3 text-sm font-medium text-black outline-none transition placeholder:text-black/30 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10";
-const BUTTON_BLUE =
-  "inline-flex items-center justify-center rounded-full bg-blue-500 px-4 py-2.5 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-50";
-const BUTTON_DARK =
-  "inline-flex items-center justify-center rounded-full bg-black px-4 py-2.5 text-xs font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50";
-const BUTTON_SUBTLE =
-  "inline-flex items-center justify-center rounded-full border border-black/10 px-4 py-2.5 text-xs font-semibold text-black transition hover:border-black hover:bg-black hover:text-white disabled:cursor-not-allowed disabled:opacity-50";
-
-const initialForm = (): ProjectForm => ({
-  name: "",
-  description: "",
-});
+const initialForm = (): ProjectForm => ({ name: "", description: "" });
 
 function formatDate(value: string) {
   const date = new Date(value);
-
   return Number.isNaN(date.getTime())
     ? "Unknown"
     : new Intl.DateTimeFormat("en-GB", {
@@ -51,12 +50,6 @@ function formatDate(value: string) {
         month: "short",
         year: "numeric",
       }).format(date);
-}
-
-function statusClass(status: ProjectStatus) {
-  return status === "ACTIVE"
-    ? "bg-emerald-50 text-emerald-700"
-    : "bg-slate-100 text-slate-600";
 }
 
 export default function ProjectsPage() {
@@ -69,15 +62,16 @@ export default function ProjectsPage() {
   const [submitting, setSubmitting] = useState(false);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<"ALL" | ProjectStatus>("ALL");
 
   const request = async <T,>(url: string, options: RequestInit = {}) => {
     const token = localStorage.getItem("token");
-
     if (!token) {
       router.replace("/login");
       throw new Error("Your session has expired. Please sign in again.");
     }
-
     const response = await fetch(url, {
       ...options,
       headers: {
@@ -87,25 +81,32 @@ export default function ProjectsPage() {
       },
     });
     const payload = (await response.json()) as ApiResponse<T>;
-
     if (response.status === 401) {
       localStorage.removeItem("token");
       router.replace("/login");
     }
-
     if (!response.ok || !payload.success) {
       throw new Error(payload.message || "Unable to complete request");
     }
-
     return payload.data as T;
   };
 
   const loadProjects = async () => {
     setError(null);
-
     try {
       const data = await request<ProjectRecord[]>("/api/projects");
       setProjects(data);
+      // Enrich with counts in the background for richer cards.
+      const detailed = await Promise.all(
+        data.map(async (project) => {
+          try {
+            return await request<ProjectRecord>(`/api/projects/${project.id}`);
+          } catch {
+            return project;
+          }
+        })
+      );
+      setProjects(detailed);
     } catch (loadError) {
       setError(
         loadError instanceof Error ? loadError.message : "Unable to load projects"
@@ -118,13 +119,13 @@ export default function ProjectsPage() {
   useEffect(() => {
     if (!router.isReady) return;
     loadProjects();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router.isReady]);
 
   const handleCreate = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setSubmitting(true);
     setError(null);
-
     try {
       const project = await request<ProjectRecord>("/api/projects", {
         method: "POST",
@@ -132,6 +133,7 @@ export default function ProjectsPage() {
       });
       setProjects((current) => [project, ...current]);
       setForm(initialForm);
+      setShowCreate(false);
     } catch (createError) {
       setError(
         createError instanceof Error
@@ -158,7 +160,6 @@ export default function ProjectsPage() {
   ) => {
     setUpdatingId(projectId);
     setError(null);
-
     try {
       const updatedProject = await request<ProjectRecord>(
         `/api/projects/${projectId}`,
@@ -169,7 +170,9 @@ export default function ProjectsPage() {
       );
       setProjects((current) =>
         current.map((project) =>
-          project.id === projectId ? updatedProject : project
+          project.id === projectId
+            ? { ...updatedProject, counts: project.counts }
+            : project
         )
       );
       setEditingId(null);
@@ -186,105 +189,154 @@ export default function ProjectsPage() {
 
   const handleEditSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-
     if (!editingId) return;
-
     await handleUpdate(editingId, editForm);
   };
+
+  const filtered = useMemo(() => {
+    return projects.filter((project) => {
+      const matchesFilter = filter === "ALL" || project.status === filter;
+      const q = query.trim().toLowerCase();
+      const matchesQuery =
+        !q ||
+        project.name.toLowerCase().includes(q) ||
+        (project.description || "").toLowerCase().includes(q);
+      return matchesFilter && matchesQuery;
+    });
+  }, [projects, filter, query]);
+
+  const FILTERS: { key: "ALL" | ProjectStatus; label: string }[] = [
+    { key: "ALL", label: "All" },
+    { key: "ACTIVE", label: "Active" },
+    { key: "ARCHIVED", label: "Archived" },
+  ];
 
   return (
     <AppShell
       eyebrow="Workspace"
+      icon="projects"
       title="Projects"
-      description="Projects centralize knowledge, resources, instructions, and generated documents for a single professional output stream."
+      description="Each project is a workspace that centralizes knowledge, source material and the documents you produce from them."
+      actions={
+        <Button
+          icon={showCreate ? "close" : "plus"}
+          variant={showCreate ? "ghost" : "primary"}
+          onClick={() => setShowCreate((v) => !v)}
+        >
+          {showCreate ? "Cancel" : "New project"}
+        </Button>
+      }
     >
-      <section className={`${CARD} p-6`}>
-        <div className="flex flex-col gap-2">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-blue-500">
+      {/* Create panel */}
+      {showCreate && (
+        <Card className="mb-6 p-6 animate-fade-up">
+          <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-accent-600">
+            <Icon name="plus" size={14} />
             New project
-          </p>
-          <h2 className="text-xl font-semibold tracking-[-0.04em]">
-            Create a project
-          </h2>
-        </div>
-
-        <form className="mt-5 grid gap-4 md:grid-cols-[1fr_1.4fr_auto]" onSubmit={handleCreate}>
-          <label className="block">
-            <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.14em] text-black/45">
-              Name
-            </span>
-            <input
-              value={form.name}
-              onChange={(event) =>
-                setForm((current) => ({ ...current, name: event.target.value }))
-              }
-              className={INPUT}
-              placeholder="Client proposal"
-              required
-            />
-          </label>
-          <label className="block">
-            <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.14em] text-black/45">
-              Description
-            </span>
-            <input
-              value={form.description}
-              onChange={(event) =>
-                setForm((current) => ({
-                  ...current,
-                  description: event.target.value,
-                }))
-              }
-              className={INPUT}
-              placeholder="Context, goal, or expected deliverable"
-            />
-          </label>
-          <div className="flex items-end">
-            <button type="submit" disabled={submitting} className={BUTTON_BLUE}>
-              {submitting ? "Creating..." : "Create project"}
-            </button>
           </div>
-        </form>
-      </section>
-
-      {error && (
-        <section className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm font-bold text-red-700">
-          {error}
-        </section>
+          <form
+            className="mt-5 grid gap-4 md:grid-cols-[1fr_1.4fr_auto] md:items-end"
+            onSubmit={handleCreate}
+          >
+            <Field label="Name">
+              <Input
+                value={form.name}
+                onChange={(event) =>
+                  setForm((current) => ({ ...current, name: event.target.value }))
+                }
+                placeholder="Client proposal"
+                required
+                autoFocus
+              />
+            </Field>
+            <Field label="Description">
+              <Input
+                value={form.description}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    description: event.target.value,
+                  }))
+                }
+                placeholder="Context, goal, or expected deliverable"
+              />
+            </Field>
+            <Button type="submit" loading={submitting} icon="check">
+              {submitting ? "Creating…" : "Create"}
+            </Button>
+          </form>
+        </Card>
       )}
 
-      <section className="mt-4">
-        {loading ? (
-          <div className={`${CARD} p-6`}>
-            <div className="animate-pulse space-y-3">
-              {Array.from({ length: 4 }).map((_, index) => (
-                <div key={index} className="h-16 rounded-2xl bg-black/5" />
-              ))}
-            </div>
+      {error && <Alert tone="danger" className="mb-6">{error}</Alert>}
+
+      {/* Toolbar */}
+      {!loading && projects.length > 0 && (
+        <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="relative w-full sm:max-w-xs">
+            <Icon
+              name="search"
+              size={16}
+              className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-faint"
+            />
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search projects"
+              className="pl-10"
+            />
           </div>
-        ) : !projects.length ? (
-          <div className={`${CARD} p-10 text-center`}>
-            <p className="text-lg font-semibold">No projects yet.</p>
-            <p className="mx-auto mt-3 max-w-xl text-sm font-medium leading-7 text-black/55">
-              Projects centralize knowledge, resources, instructions, and
-              generated documents so each deliverable has one controlled source
-              of context.
-            </p>
-            <button
-              type="button"
-              onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-              className={`${BUTTON_BLUE} mt-6`}
-            >
-              Create the first project
-            </button>
+          <div className="inline-flex rounded-xl border border-line bg-surface p-1">
+            {FILTERS.map((f) => (
+              <button
+                key={f.key}
+                type="button"
+                onClick={() => setFilter(f.key)}
+                className={
+                  filter === f.key
+                    ? "rounded-lg bg-ink px-3.5 py-1.5 text-xs font-semibold text-white"
+                    : "rounded-lg px-3.5 py-1.5 text-xs font-semibold text-ink-muted transition-colors hover:text-ink"
+                }
+              >
+                {f.label}
+              </button>
+            ))}
           </div>
-        ) : (
-          <div className="grid gap-4 lg:grid-cols-2">
-            {projects.map((project) => (
-              <article key={project.id} className={`${CARD} p-5`}>
-                {editingId === project.id ? (
-                  <form className="space-y-4" onSubmit={handleEditSubmit}>
-                    <input
+        </div>
+      )}
+
+      {/* List */}
+      {loading ? (
+        <div className="grid gap-4 lg:grid-cols-2">
+          {Array.from({ length: 4 }).map((_, index) => (
+            <Skeleton key={index} className="h-44" />
+          ))}
+        </div>
+      ) : !projects.length ? (
+        <EmptyState
+          icon="projects"
+          title="No projects yet"
+          description="Projects centralize knowledge, resources and generated documents so each deliverable has one controlled source of context."
+          action={
+            <Button icon="plus" onClick={() => setShowCreate(true)}>
+              Create your first project
+            </Button>
+          }
+        />
+      ) : !filtered.length ? (
+        <EmptyState
+          icon="search"
+          title="No matching projects"
+          description="Try a different search or filter."
+        />
+      ) : (
+        <div className="grid gap-4 lg:grid-cols-2">
+          {filtered.map((project) => (
+            <Card key={project.id} interactive className="p-5">
+              {editingId === project.id ? (
+                <form className="space-y-4" onSubmit={handleEditSubmit}>
+                  <Field label="Name">
+                    <Input
                       value={editForm.name}
                       onChange={(event) =>
                         setEditForm((current) => ({
@@ -292,10 +344,11 @@ export default function ProjectsPage() {
                           name: event.target.value,
                         }))
                       }
-                      className={INPUT}
                       required
                     />
-                    <textarea
+                  </Field>
+                  <Field label="Description">
+                    <Textarea
                       value={editForm.description}
                       onChange={(event) =>
                         setEditForm((current) => ({
@@ -303,59 +356,94 @@ export default function ProjectsPage() {
                           description: event.target.value,
                         }))
                       }
-                      className={`${INPUT} min-h-[96px] resize-y`}
+                      className="min-h-[90px]"
                     />
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="submit"
-                        disabled={updatingId === project.id}
-                        className={BUTTON_DARK}
-                      >
-                        {updatingId === project.id ? "Saving..." : "Save"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setEditingId(null)}
-                        className={BUTTON_SUBTLE}
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </form>
-                ) : (
-                  <>
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <h2 className="text-xl font-semibold tracking-[-0.04em]">
+                  </Field>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="submit"
+                      variant="secondary"
+                      loading={updatingId === project.id}
+                    >
+                      {updatingId === project.id ? "Saving…" : "Save"}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={() => setEditingId(null)}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </form>
+              ) : (
+                <>
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex min-w-0 items-start gap-3">
+                      <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-accent-50 text-accent-600">
+                        <Icon name="projects" size={20} />
+                      </span>
+                      <div className="min-w-0">
+                        <h2 className="truncate text-lg font-semibold tracking-tight text-ink">
                           {project.name}
                         </h2>
-                        <p className="mt-2 text-sm font-medium leading-6 text-black/55">
+                        <p className="mt-1 line-clamp-2 text-sm leading-6 text-ink-muted">
                           {project.description || "No description yet."}
                         </p>
                       </div>
-                      <span
-                        className={`rounded-full px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] ${statusClass(
-                          project.status
-                        )}`}
-                      >
-                        {project.status}
-                      </span>
                     </div>
+                    <StatusPill status={project.status} />
+                  </div>
 
-                    <p className="mt-5 text-xs font-medium text-black/45">
-                      Created {formatDate(project.createdAt)}
+                  {project.counts && (
+                    <div className="mt-5 grid grid-cols-3 gap-2">
+                      {[
+                        {
+                          icon: "documents" as const,
+                          label: "Docs",
+                          value: project.counts.documents,
+                        },
+                        {
+                          icon: "knowledge" as const,
+                          label: "Knowledge",
+                          value: project.counts.knowledgeItems,
+                        },
+                        {
+                          icon: "resources" as const,
+                          label: "Resources",
+                          value: project.counts.resources,
+                        },
+                      ].map((c) => (
+                        <div
+                          key={c.label}
+                          className="rounded-xl bg-ink/[0.03] px-3 py-2.5"
+                        >
+                          <div className="flex items-center gap-1.5 text-ink-muted">
+                            <Icon name={c.icon} size={13} />
+                            <span className="text-[10px] font-semibold uppercase tracking-[0.08em]">
+                              {c.label}
+                            </span>
+                          </div>
+                          <p className="mt-1 text-lg font-semibold text-ink">
+                            {c.value}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="mt-5 flex items-center justify-between">
+                    <p className="text-xs font-medium text-ink-faint">
+                      Updated {formatDate(project.updatedAt)}
                     </p>
-
-                    <div className="mt-5 flex flex-wrap gap-2">
-                      <Link href={`/dashboard/projects/${project.id}`}>
-                        <a className={BUTTON_DARK}>Open</a>
-                      </Link>
+                    <div className="flex flex-wrap gap-2">
                       <button
                         type="button"
                         onClick={() => startEditing(project)}
-                        className={BUTTON_SUBTLE}
+                        className="flex h-8 w-8 items-center justify-center rounded-lg border border-line text-ink-muted transition-colors hover:border-ink/20 hover:text-ink"
+                        title="Edit"
                       >
-                        Edit
+                        <Icon name="edit" size={15} />
                       </button>
                       <button
                         type="button"
@@ -363,21 +451,32 @@ export default function ProjectsPage() {
                         onClick={() =>
                           handleUpdate(project.id, {
                             status:
-                              project.status === "ACTIVE" ? "ARCHIVED" : "ACTIVE",
+                              project.status === "ACTIVE"
+                                ? "ARCHIVED"
+                                : "ACTIVE",
                           })
                         }
-                        className={BUTTON_SUBTLE}
+                        className="flex h-8 w-8 items-center justify-center rounded-lg border border-line text-ink-muted transition-colors hover:border-ink/20 hover:text-ink disabled:opacity-50"
+                        title={
+                          project.status === "ACTIVE" ? "Archive" : "Reactivate"
+                        }
                       >
-                        {project.status === "ACTIVE" ? "Archive" : "Reactivate"}
+                        <Icon name="archive" size={15} />
                       </button>
+                      <Link href={`/dashboard/projects/${project.id}`}>
+                        <a className={buttonClass("secondary", "sm")}>
+                          Open
+                          <Icon name="arrow-right" size={14} />
+                        </a>
+                      </Link>
                     </div>
-                  </>
-                )}
-              </article>
-            ))}
-          </div>
-        )}
-      </section>
+                  </div>
+                </>
+              )}
+            </Card>
+          ))}
+        </div>
+      )}
     </AppShell>
   );
 }
