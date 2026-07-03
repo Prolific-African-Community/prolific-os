@@ -6,6 +6,19 @@ export function getOpenAIModel() {
   return process.env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL;
 }
 
+/**
+ * Model used for resource distillation. This is a cheaper, faster task than
+ * final document writing, so it can run on a smaller model. Falls back to the
+ * main model, then the default.
+ */
+export function getDistillationModel() {
+  return process.env.OPENAI_MODEL_DISTILLATION || getOpenAIModel();
+}
+
+export function hasOpenAIKey() {
+  return Boolean(process.env.OPENAI_API_KEY);
+}
+
 export function getOpenAIClient() {
   if (!process.env.OPENAI_API_KEY) {
     throw new Error(
@@ -67,13 +80,15 @@ export interface GenerateTextOptions {
   instructions?: string;
   /** Upper bound on generated tokens. Long deliverables need a high ceiling. */
   maxOutputTokens?: number;
+  /** Override the model (e.g. a cheaper model for distillation). */
+  model?: string;
 }
 
 export async function generateTextWithOpenAI(
   prompt: string,
   options: GenerateTextOptions = {}
 ) {
-  const model = getOpenAIModel();
+  const model = options.model || getOpenAIModel();
 
   try {
     const client = getOpenAIClient();

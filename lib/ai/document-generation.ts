@@ -11,6 +11,11 @@ import {
   getLengthDirective,
   getTypePlaybook,
 } from "./document-standards";
+import {
+  ExtractionMeta,
+  decodeExtraction,
+} from "../resources/extraction-meta";
+import { SourceBrief } from "../resources/source-brief";
 
 export type DocumentGenerationContext = {
   project: Project;
@@ -40,21 +45,119 @@ const listKnowledge = (items: ProjectKnowledge[]) => {
     .join("\n\n");
 };
 
+type DecodedResource = {
+  resource: Resource;
+  text: string | null;
+  meta: ExtractionMeta | null;
+  brief: SourceBrief | null;
+  briefStatus: string | null;
+};
+
+const asBrief = (value: unknown): SourceBrief | null =>
+  value && typeof value === "object" ? (value as SourceBrief) : null;
+
+const decodeResources = (items: Resource[]): DecodedResource[] =>
+  items.map((resource) => {
+    const { text, meta } = decodeExtraction(resource.extractedText);
+    return {
+      resource,
+      text,
+      meta,
+      brief: asBrief((resource as { sourceBrief?: unknown }).sourceBrief),
+      briefStatus:
+        (resource as { sourceBriefStatus?: string | null }).sourceBriefStatus ??
+        null,
+    };
+  });
+
+/** Resource list with the extraction header decoded, so richness reflects the
+ * clean text rather than the packed metadata. */
+const resourcesWithCleanText = (items: Resource[]): Resource[] =>
+  decodeResources(items).map(({ resource, text }) => ({
+    ...resource,
+    extractedText: text,
+  }));
+
+const list = (title: string, items: string[], cap = 8) =>
+  items.length ? `${title}:\n${items.slice(0, cap).map((i) => `- ${i}`).join("\n")}` : "";
+
+/** Compact, prompt-friendly rendering of a source brief (distilled facts). */
+const briefBlock = (brief: SourceBrief): string => {
+  const parts: string[] = [];
+  if (brief.summary) parts.push(`Summary: ${brief.summary}`);
+  parts.push(list("Key facts", brief.keyFacts));
+  if (brief.keyFigures.length) {
+    parts.push(
+      "Key figures (PRESERVE EXACTLY):\n" +
+        brief.keyFigures
+          .slice(0, 12)
+          .map(
+            (f) =>
+              `- ${f.label}: ${f.value}${f.context ? ` (${f.context})` : ""}`
+          )
+          .join("\n")
+    );
+  }
+  if (brief.entities.length) {
+    parts.push(
+      list(
+        "Entities",
+        brief.entities.map(
+          (e) => `${e.name} — ${e.type}${e.role ? ` (${e.role})` : ""}`
+        )
+      )
+    );
+  }
+  parts.push(list("Risks", brief.risks));
+  parts.push(list("Assumptions (not confirmed)", brief.assumptions));
+  parts.push(list("Constraints", brief.constraints));
+  parts.push(list("Open questions", brief.openQuestions));
+  if (brief.usefulForSections.length) {
+    parts.push(`Useful for sections: ${brief.usefulForSections.join(", ")}`);
+  }
+  return parts.filter(Boolean).join("\n");
+};
+
 const listResources = (items: Resource[]) => {
   if (!items.length) return "- None";
 
-  return items
-    .map((item, index) => {
-      const url = item.storageUrl ? `\nURL: ${item.storageUrl}` : "";
-      const size =
-        item.sizeBytes !== null && item.sizeBytes !== undefined
-          ? `\nSize: ${item.sizeBytes} bytes`
-          : "";
-      const extractedText = item.extractedText
-        ? `\nExtracted text / notes: ${clamp(item.extractedText, 2200)}`
-        : "\nExtracted text: [none — treat as metadata only]";
+  const decoded = decodeResources(items);
+  const rank = (d: DecodedResource) =>
+    d.brief && (d.briefStatus === "ready" || d.briefStatus === "partial")
+      ? 2
+      : d.text
+      ? 1
+      : 0;
+  // Distilled sources first, then raw-text sources, then metadata-only.
+  decoded.sort((a, b) => rank(b) - rank(a));
 
-      return `${index + 1}. ${item.filename} (${item.mimeType})${size}${url}${extractedText}`;
+  return decoded
+    .map(({ resource, text, meta, brief, briefStatus }, index) => {
+      const url = resource.storageUrl ? `\nURL: ${resource.storageUrl}` : "";
+      const size =
+        resource.sizeBytes !== null && resource.sizeBytes !== undefined
+          ? `\nSize: ${resource.sizeBytes} bytes`
+          : "";
+      const statusLine = meta
+        ? `\nExtraction: ${meta.status}${meta.summary ? ` — ${meta.summary}` : ""}`
+        : "";
+
+      const useBrief =
+        brief && (briefStatus === "ready" || briefStatus === "partial") &&
+        (brief.summary || brief.keyFacts.length || brief.keyFigures.length);
+
+      let body: string;
+      if (useBrief && brief) {
+        const excerpt = text ? `\nRaw excerpt:\n${clamp(text, 900)}` : "";
+        body = `\nSource brief (${briefStatus}):\n${briefBlock(brief)}${excerpt}`;
+      } else if (text) {
+        body = `\nExtracted content:\n${clamp(text, 3000)}`;
+      } else {
+        body =
+          "\nExtracted content: [none available — treat as a known gap; do NOT fabricate its contents]";
+      }
+
+      return `${index + 1}. ${resource.filename} (${resource.mimeType})${size}${url}${statusLine}${body}`;
     })
     .join("\n\n");
 };
@@ -66,7 +169,7 @@ const extractFigures = (context: DocumentGenerationContext) => {
     context.document.objective || "",
     context.document.instructions || "",
     ...context.knowledgeItems.map((k) => k.content),
-    ...context.resources.map((r) => r.extractedText || ""),
+    ...context.resources.map((r) => decodeExtraction(r.extractedText).text || ""),
   ].join("\n");
 
   const matches = haystack.match(
@@ -90,19 +193,19 @@ export function buildGenerationInputSummary({
     const category = item.category ? ` (${item.category})` : "";
     return `${item.title}${category}`;
   });
-  const resourceSummary = resources.slice(0, 8).map((item) => {
-    const extractedText = item.extractedText
-      ? `\n  Extracted text: ${clamp(item.extractedText, 600)}`
-      : "";
-
-    return `${item.filename} (${item.mimeType})${extractedText}`;
-  });
+  const resourceSummary = decodeResources(resources)
+    .slice(0, 8)
+    .map(({ resource, text, meta }) => {
+      const status = meta ? ` [${meta.status}]` : "";
+      const preview = text ? `\n  Preview: ${clamp(text, 600)}` : "";
+      return `${resource.filename} (${resource.mimeType})${status}${preview}`;
+    });
 
   const richness = estimateContextRichness({
     project,
     document,
     knowledgeItems,
-    resources,
+    resources: resourcesWithCleanText(resources),
   });
   const playbook = getTypePlaybook(
     document.type,
@@ -153,7 +256,10 @@ export function buildDocumentSystemInstructions() {
 export function buildDocumentGenerationPrompt(context: DocumentGenerationContext) {
   const { project, document, knowledgeItems, resources } = context;
   const template = document.template;
-  const richness = estimateContextRichness(context);
+  const richness = estimateContextRichness({
+    ...context,
+    resources: resourcesWithCleanText(resources),
+  });
   const playbook = getTypePlaybook(
     document.type,
     template?.name,
@@ -208,8 +314,10 @@ export function buildDocumentGenerationPrompt(context: DocumentGenerationContext
     listKnowledge(knowledgeItems),
     "",
     "====================",
-    "PROJECT RESOURCES (source material)",
+    "PROJECT RESOURCES (source material — distilled source briefs first, then raw excerpts)",
     "====================",
+    "Use the distilled facts, figures and risks from each source brief as primary evidence. Preserve every figure exactly. Raw excerpts are provided for specificity; do not fabricate beyond what a source contains.",
+    "",
     listResources(resources),
     "",
     "====================",

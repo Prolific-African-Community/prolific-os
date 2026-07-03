@@ -8,6 +8,14 @@ import {
   WorkflowStepper,
 } from "../../../components/product/workflow";
 import {
+  EXTRACTION_STATUS_UI,
+  ExtractionStatus,
+} from "../../../lib/resources/extraction-meta";
+import {
+  SOURCE_BRIEF_STATUS_UI,
+  SourceBriefStatus,
+} from "../../../lib/resources/source-brief";
+import {
   Alert,
   Badge,
   Button,
@@ -98,6 +106,18 @@ interface DocumentForm {
   templateId: string;
 }
 
+interface ResourceExtraction {
+  status: ExtractionStatus;
+  summary?: string | null;
+  fileType?: string;
+  pages?: number;
+  sheets?: number;
+  characters?: number;
+  words?: number;
+  tablesDetected?: number;
+  warnings?: string[];
+}
+
 interface ResourceItem {
   id: string;
   projectId: string;
@@ -107,6 +127,11 @@ interface ResourceItem {
   sizeBytes?: number | null;
   storageUrl?: string | null;
   extractedText?: string | null;
+  extraction?: ResourceExtraction | null;
+  sourceBriefStatus?: SourceBriefStatus | null;
+  sourceBriefSummary?: string | null;
+  keyFigureCount?: number;
+  sourceBriefUpdatedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -230,6 +255,9 @@ export default function ProjectDetailPage() {
   const [deletingResourceId, setDeletingResourceId] = useState<string | null>(
     null
   );
+  const [distillingResourceId, setDistillingResourceId] = useState<
+    string | null
+  >(null);
   const [deletingDocumentId, setDeletingDocumentId] = useState<string | null>(
     null
   );
@@ -711,6 +739,31 @@ export default function ProjectDetailPage() {
       );
     } finally {
       setUpdatingResourceId(null);
+    }
+  };
+
+  const handleResourceDistill = async (item: ResourceItem) => {
+    if (!projectId) return;
+    setDistillingResourceId(item.id);
+    setResourcesError(null);
+    try {
+      const updated = await request<ResourceItem>(
+        `/api/projects/${projectId}/resources/${item.id}/distill`,
+        { method: "POST" }
+      );
+      setResources((current) =>
+        current.map((resource) =>
+          resource.id === item.id ? { ...resource, ...updated } : resource
+        )
+      );
+    } catch (distillError) {
+      setResourcesError(
+        distillError instanceof Error
+          ? distillError.message
+          : "Unable to generate source brief"
+      );
+    } finally {
+      setDistillingResourceId(null);
     }
   };
 
@@ -1507,17 +1560,50 @@ export default function ProjectDetailPage() {
                                 <span className="text-xs font-medium text-ink-muted">
                                   {formatSize(item.sizeBytes)}
                                 </span>
-                                {item.extractedText ? (
-                                  <Badge tone="success" icon="check">
-                                    Text extracted
+                                {(() => {
+                                  const status: ExtractionStatus =
+                                    item.extraction?.status ||
+                                    (item.extractedText
+                                      ? "provided"
+                                      : item.storageUrl
+                                      ? "empty"
+                                      : "empty");
+                                  const ui = EXTRACTION_STATUS_UI[status];
+                                  return (
+                                    <Badge
+                                      tone={ui.tone}
+                                      icon={
+                                        status === "extracted" ||
+                                        status === "provided"
+                                          ? "check"
+                                          : status === "failed"
+                                          ? "alert"
+                                          : status === "visual"
+                                          ? "image"
+                                          : undefined
+                                      }
+                                    >
+                                      {ui.label}
+                                    </Badge>
+                                  );
+                                })()}
+                                {item.extraction?.pages ? (
+                                  <Badge tone="neutral">
+                                    {item.extraction.pages} page
+                                    {item.extraction.pages > 1 ? "s" : ""}
                                   </Badge>
-                                ) : item.storageUrl ? (
-                                  <Badge tone="accent" icon="upload">
-                                    Uploaded
+                                ) : null}
+                                {item.extraction?.sheets ? (
+                                  <Badge tone="neutral">
+                                    {item.extraction.sheets} sheet
+                                    {item.extraction.sheets > 1 ? "s" : ""}
                                   </Badge>
-                                ) : (
-                                  <Badge tone="neutral">Reference only</Badge>
-                                )}
+                                ) : null}
+                                {item.extraction?.words ? (
+                                  <Badge tone="neutral">
+                                    {item.extraction.words.toLocaleString()} words
+                                  </Badge>
+                                ) : null}
                               </div>
                               {item.storageUrl && (
                                 <a
@@ -1530,18 +1616,92 @@ export default function ProjectDetailPage() {
                                   Open file
                                 </a>
                               )}
+                              {item.extraction?.warnings?.length ? (
+                                <div className="mt-3 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2.5">
+                                  <Icon
+                                    name="alert"
+                                    size={15}
+                                    className="mt-0.5 shrink-0 text-amber-500"
+                                  />
+                                  <p className="text-xs leading-5 text-amber-700">
+                                    {item.extraction.warnings[0]}
+                                  </p>
+                                </div>
+                              ) : null}
                               {item.extractedText && (
                                 <div className="mt-3 rounded-xl border border-line bg-ink/[0.02] px-4 py-3">
                                   <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-muted">
                                     Extraction preview
                                   </p>
-                                  <p className="mt-1.5 text-sm leading-6 text-ink-soft">
-                                    {item.extractedText.length > 220
-                                      ? `${item.extractedText.slice(0, 220)}…`
+                                  <p className="mt-1.5 whitespace-pre-wrap text-sm leading-6 text-ink-soft">
+                                    {item.extractedText.length > 280
+                                      ? `${item.extractedText.slice(0, 280)}…`
                                       : item.extractedText}
                                   </p>
                                 </div>
                               )}
+                              {(() => {
+                                const status: SourceBriefStatus | null =
+                                  item.sourceBriefStatus ??
+                                  (item.extractedText ? "pending" : null);
+                                if (!status || status === "not_applicable")
+                                  return null;
+                                const ui = SOURCE_BRIEF_STATUS_UI[status];
+                                const busy = distillingResourceId === item.id;
+                                const ready =
+                                  status === "ready" || status === "partial";
+                                return (
+                                  <div className="mt-3 rounded-xl border border-line bg-accent-50/30 px-4 py-3">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <Badge
+                                        tone={ui.tone}
+                                        icon={
+                                          status === "ready"
+                                            ? "sparkles"
+                                            : status === "failed"
+                                            ? "alert"
+                                            : undefined
+                                        }
+                                      >
+                                        {ui.label}
+                                      </Badge>
+                                      {item.keyFigureCount ? (
+                                        <Badge tone="neutral" icon="bolt">
+                                          {item.keyFigureCount} key figure
+                                          {item.keyFigureCount > 1 ? "s" : ""}
+                                        </Badge>
+                                      ) : null}
+                                      <button
+                                        type="button"
+                                        disabled={busy}
+                                        onClick={() => handleResourceDistill(item)}
+                                        className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-2.5 py-1.5 text-xs font-semibold text-ink transition-colors hover:border-accent-300 hover:text-accent-700 disabled:opacity-50"
+                                      >
+                                        {busy ? (
+                                          <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-accent-500 border-t-transparent" />
+                                        ) : (
+                                          <Icon name="generate" size={13} />
+                                        )}
+                                        {busy
+                                          ? "Distilling…"
+                                          : ready
+                                          ? "Refresh brief"
+                                          : "Generate brief"}
+                                      </button>
+                                    </div>
+                                    {item.sourceBriefSummary && (
+                                      <p className="mt-2 text-sm leading-6 text-ink-soft">
+                                        {item.sourceBriefSummary.length > 240
+                                          ? `${item.sourceBriefSummary.slice(0, 240)}…`
+                                          : item.sourceBriefSummary}
+                                      </p>
+                                    )}
+                                    <p className="mt-1.5 text-xs text-ink-muted">
+                                      {ui.hint}
+                                    </p>
+                                  </div>
+                                );
+                              })()}
                             </div>
                           </div>
                           <div className="flex shrink-0 gap-2">

@@ -87,6 +87,15 @@ model Resource {
   sizeBytes     Int?
   storageUrl    String?
   extractedText String?
+
+  // Resource Distillation (Ticket 021): a structured "source brief" derived
+  // from the extracted text. All nullable so existing rows/flows are unaffected.
+  sourceBrief          Json?
+  sourceBriefText      String?
+  sourceBriefStatus    String?
+  sourceBriefModel     String?
+  sourceBriefUpdatedAt DateTime?
+
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 

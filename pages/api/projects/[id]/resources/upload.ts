@@ -1,8 +1,8 @@
 import { put } from "@vercel/blob";
+import { Prisma } from "@prisma/client";
 import formidable, { File } from "formidable";
 import fs from "fs/promises";
 import type { NextApiResponse } from "next";
-import type { Resource } from "@prisma/client";
 import {
   AuthenticatedNextApiRequest,
   withAuth,
@@ -13,7 +13,13 @@ import {
   RESOURCE_UPLOAD_MAX_BYTES,
   sanitizeUploadedFilename,
 } from "../../../../../lib/resources/upload";
-import { extractTextFromUploadedResource } from "../../../../../lib/resources/extract-text";
+import {
+  encodeExtractionForStorage,
+  runResourceExtraction,
+} from "../../../../../lib/resources/resource-intelligence";
+import { serializeResource } from "../../../../../lib/resources/extraction-meta";
+import { resourceTypeFrom } from "../../../../../lib/resources/source-brief";
+import { distillResource } from "../../../../../lib/ai/resource-distillation";
 
 export const config = {
   api: {
@@ -23,19 +29,6 @@ export const config = {
 
 const getProjectId = (value: string | string[] | undefined) =>
   typeof value === "string" && value.trim() ? value.trim() : null;
-
-const serializeResource = (resource: Resource) => ({
-  id: resource.id,
-  projectId: resource.projectId,
-  documentId: resource.documentId,
-  filename: resource.filename,
-  mimeType: resource.mimeType,
-  sizeBytes: resource.sizeBytes,
-  storageUrl: resource.storageUrl,
-  extractedText: resource.extractedText,
-  createdAt: resource.createdAt.toISOString(),
-  updatedAt: resource.updatedAt.toISOString(),
-});
 
 async function getOwnedProject(projectId: string, userId: string) {
   return prisma.project.findFirst({
@@ -141,11 +134,23 @@ export default withAuth(
 
       const safeFilename = sanitizeUploadedFilename(originalFilename);
       const fileBuffer = await fs.readFile(file.filepath);
-      const extractedText = extractTextFromUploadedResource({
+      const extraction = await runResourceExtraction({
         filename: originalFilename,
         mimeType,
         buffer: fileBuffer,
+        sizeBytes: file.size,
       });
+      const extractedText = encodeExtractionForStorage(extraction);
+
+      // Auto-distill on upload. This never throws — on any failure (no key,
+      // quota, parse error) it returns a graceful status so upload succeeds.
+      const distillation = await distillResource({
+        filename: originalFilename,
+        resourceType: resourceTypeFrom(extraction.meta.fileType, mimeType),
+        extractionStatus: extraction.meta.status,
+        extractedText: extraction.extractedText,
+      });
+
       const blob = await put(
         `projects/${projectId}/resources/${Date.now()}-${safeFilename}`,
         fileBuffer,
@@ -164,6 +169,11 @@ export default withAuth(
           sizeBytes: file.size,
           storageUrl: blob.url,
           extractedText,
+          sourceBrief: distillation.brief as unknown as Prisma.InputJsonValue,
+          sourceBriefText: distillation.markdown,
+          sourceBriefStatus: distillation.status,
+          sourceBriefModel: distillation.model,
+          sourceBriefUpdatedAt: new Date(),
         },
       });
 

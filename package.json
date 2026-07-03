@@ -26,12 +26,15 @@
     "docx": "^9.7.1",
     "formidable": "^3.5.4",
     "jsonwebtoken": "^9.0.2",
+    "mammoth": "^1.8.0",
     "next": "latest",
     "openai": "^6.45.0",
+    "pdf-parse": "^1.1.1",
     "pdfkit": "^0.19.1",
     "prisma": "^5.22.0",
     "react": "latest",
-    "react-dom": "latest"
+    "react-dom": "latest",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
