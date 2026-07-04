@@ -49,7 +49,10 @@ export default withAuth(
 
       const parts = [`${result.generated} generated`];
       if (result.failed) parts.push(`${result.failed} failed`);
-      if (result.skipped) parts.push(`${result.skipped} skipped`);
+      if (result.skippedLocked)
+        parts.push(`${result.skippedLocked} locked skipped`);
+      if (result.skippedExisting)
+        parts.push(`${result.skippedExisting} already written`);
 
       return res.status(200).json({
         success: true,
@@ -58,7 +61,8 @@ export default withAuth(
           sections: result.sections,
           generated: result.generated,
           failed: result.failed,
-          skipped: result.skipped,
+          skippedLocked: result.skippedLocked,
+          skippedExisting: result.skippedExisting,
         },
       });
     } catch (error) {

@@ -140,6 +140,8 @@ model Document {
   documentPlanUpdatedAt DateTime?
   // Ticket 025: when the plan was last applied to sections (for out-of-sync detection).
   documentPlanAppliedAt DateTime?
+  // Ticket 027: when sections were last assembled into content (for staleness).
+  assembledAt           DateTime?
 
   resources      Resource[]
   generationRuns GenerationRun[]
@@ -186,6 +188,13 @@ model DocumentSection {
   lastRewriteInstruction String?
   rewriteCount           Int       @default(0)
   rewrittenAt            DateTime?
+
+  // Ticket 027: review status + locking (additive).
+  reviewStatus  String    @default("DRAFT")
+  isLocked      Boolean   @default(false)
+  lockedAt      DateTime?
+  reviewedAt    DateTime?
+  approvedAt    DateTime?
 
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt

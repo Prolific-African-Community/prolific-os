@@ -27,8 +27,11 @@ import {
 } from "../../../../../lib/documents/document-plan";
 import { PlanBlueprint } from "../../../../../components/product/plan-blueprint";
 import {
+  REVIEW_STATUS_UI,
   SECTION_STATUS_UI,
   SectionDTO,
+  isDocumentStale,
+  summarizeSectionReadiness,
 } from "../../../../../lib/documents/document-sections";
 
 type DocumentStatus =
@@ -67,6 +70,7 @@ interface DocumentDetail {
   documentPlanStatus?: DocumentPlanStatus | null;
   documentPlanUpdatedAt?: string | null;
   documentPlanAppliedAt?: string | null;
+  assembledAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -211,6 +215,12 @@ export default function DocumentDetailPage() {
   const [rewritingSectionId, setRewritingSectionId] = useState<string | null>(
     null
   );
+  const [documentAssembledAt, setDocumentAssembledAt] = useState<string | null>(
+    null
+  );
+  const [updatingSectionMetaId, setUpdatingSectionMetaId] = useState<
+    string | null
+  >(null);
   const [sectionsError, setSectionsError] = useState<string | null>(null);
   const [sectionsNote, setSectionsNote] = useState<string | null>(null);
   const [exportingMarkdown, setExportingMarkdown] = useState(false);
@@ -314,6 +324,7 @@ export default function DocumentDetailPage() {
       setPlanStatus(data.documentPlanStatus ?? null);
       setPlanUpdatedAt(data.documentPlanUpdatedAt ?? null);
       setPlanAppliedAt(data.documentPlanAppliedAt ?? null);
+      setDocumentAssembledAt(data.assembledAt ?? null);
       setForm({
         title: data.title,
         type: data.type,
@@ -654,15 +665,16 @@ export default function DocumentDetailPage() {
     setSectionsError(null);
     setSectionsNote(null);
     try {
-      const { data, message } = await requestFull<{ content: string }>(
-        `${sectionsBase()}/assemble`,
-        { method: "POST" }
-      );
+      const { data, message } = await requestFull<{
+        content: string;
+        assembledAt: string;
+      }>(`${sectionsBase()}/assemble`, { method: "POST" });
       setForm((cur) => ({ ...cur, content: data.content }));
       setDocument((cur) =>
         cur ? { ...cur, content: data.content, status: "READY_FOR_REVIEW" } : cur
       );
-      setSectionsNote(message ?? "Document assembled from sections.");
+      setDocumentAssembledAt(data.assembledAt);
+      setSectionsNote(message ?? "Document assembled with latest sections.");
       setView("preview");
     } catch (err) {
       setSectionsError(
@@ -670,6 +682,30 @@ export default function DocumentDetailPage() {
       );
     } finally {
       setAssembling(false);
+    }
+  };
+
+  const handleSectionMeta = async (
+    id: string,
+    patch: { reviewStatus?: string; isLocked?: boolean },
+    note: string
+  ) => {
+    setUpdatingSectionMetaId(id);
+    setSectionsError(null);
+    setSectionsNote(null);
+    try {
+      const section = await request<SectionDTO>(`${sectionsBase()}/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify(patch),
+      });
+      setSections((cur) => cur.map((s) => (s.id === id ? section : s)));
+      setSectionsNote(note);
+    } catch (err) {
+      setSectionsError(
+        err instanceof Error ? err.message : "Unable to update section"
+      );
+    } finally {
+      setUpdatingSectionMetaId(null);
     }
   };
 
@@ -1144,6 +1180,81 @@ export default function DocumentDetailPage() {
                   </div>
                 ) : (
                   <>
+                    {(() => {
+                      const r = summarizeSectionReadiness(sections);
+                      const stale = isDocumentStale(
+                        documentAssembledAt,
+                        sections
+                      );
+                      return (
+                        <>
+                          <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-muted">
+                            <span className="font-semibold text-ink">
+                              {r.total} sections
+                            </span>
+                            <span>· {r.withContent} written</span>
+                            {r.approved > 0 && (
+                              <span>· {r.approved} approved</span>
+                            )}
+                            {r.locked > 0 && (
+                              <span className="text-amber-600">
+                                · {r.locked} locked
+                              </span>
+                            )}
+                            {r.failed > 0 && (
+                              <span className="text-red-600">
+                                · {r.failed} failed
+                              </span>
+                            )}
+                          </div>
+                          {r.withContent > 0 && (
+                            <div
+                              className={cn(
+                                "mt-3 flex flex-col gap-2 rounded-xl border px-4 py-3 sm:flex-row sm:items-center sm:justify-between",
+                                stale
+                                  ? "border-amber-200 bg-amber-50"
+                                  : "border-emerald-200 bg-emerald-50"
+                              )}
+                            >
+                              <div className="flex items-start gap-2.5">
+                                <Icon
+                                  name={stale ? "alert" : "check-circle"}
+                                  size={17}
+                                  className={cn(
+                                    "mt-0.5 shrink-0",
+                                    stale ? "text-amber-500" : "text-emerald-500"
+                                  )}
+                                />
+                                <p
+                                  className={cn(
+                                    "text-xs leading-5",
+                                    stale ? "text-amber-700" : "text-emerald-700"
+                                  )}
+                                >
+                                  {stale
+                                    ? "Final document is out of date. Re-assemble to include the latest section changes."
+                                    : "Final document is up to date."}
+                                </p>
+                              </div>
+                              {stale && (
+                                <Button
+                                  type="button"
+                                  variant="secondary"
+                                  size="sm"
+                                  icon="check"
+                                  loading={assembling}
+                                  onClick={handleAssemble}
+                                  className="shrink-0"
+                                >
+                                  Assemble latest document
+                                </Button>
+                              )}
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
+
                     <div className="mt-4 flex flex-wrap gap-2">
                       <Button
                         type="button"
@@ -1194,6 +1305,18 @@ export default function DocumentDetailPage() {
                                     {s.title}
                                   </h4>
                                   <Badge tone={ui.tone}>{ui.label}</Badge>
+                                  {s.reviewStatus !== "DRAFT" && (
+                                    <Badge
+                                      tone={REVIEW_STATUS_UI[s.reviewStatus].tone}
+                                    >
+                                      {REVIEW_STATUS_UI[s.reviewStatus].label}
+                                    </Badge>
+                                  )}
+                                  {s.isLocked && (
+                                    <Badge tone="warning" icon="lock">
+                                      Locked
+                                    </Badge>
+                                  )}
                                 </div>
                                 <div className="mt-1.5 flex flex-wrap gap-3 text-xs text-ink-muted">
                                   <span>
@@ -1211,10 +1334,16 @@ export default function DocumentDetailPage() {
                               <div className="flex shrink-0 gap-1.5">
                                 <button
                                   type="button"
-                                  disabled={busy}
+                                  disabled={busy || s.isLocked}
                                   onClick={() => handleGenerateSection(s.id)}
-                                  title={s.content ? "Regenerate" : "Generate"}
-                                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-line text-ink-muted transition-colors hover:border-accent-300 hover:text-accent-700 disabled:opacity-50"
+                                  title={
+                                    s.isLocked
+                                      ? "Unlock to regenerate"
+                                      : s.content
+                                      ? "Regenerate"
+                                      : "Generate"
+                                  }
+                                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-line text-ink-muted transition-colors hover:border-accent-300 hover:text-accent-700 disabled:opacity-40"
                                 >
                                   {busy ? (
                                     <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-accent-500 border-t-transparent" />
@@ -1222,7 +1351,7 @@ export default function DocumentDetailPage() {
                                     <Icon name="generate" size={15} />
                                   )}
                                 </button>
-                                {s.content && (
+                                {s.content && !s.isLocked && (
                                   <button
                                     type="button"
                                     onClick={() =>
@@ -1243,18 +1372,75 @@ export default function DocumentDetailPage() {
                                 )}
                                 <button
                                   type="button"
+                                  disabled={s.isLocked}
                                   onClick={() =>
                                     editingSectionId === s.id
                                       ? setEditingSectionId(null)
                                       : startSectionEdit(s)
                                   }
-                                  title="Edit"
-                                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-line text-ink-muted transition-colors hover:border-ink/20 hover:text-ink"
+                                  title={s.isLocked ? "Unlock to edit" : "Edit"}
+                                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-line text-ink-muted transition-colors hover:border-ink/20 hover:text-ink disabled:opacity-40"
                                 >
                                   <Icon name="edit" size={15} />
                                 </button>
                               </div>
                             </div>
+
+                            {s.content && (
+                              <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                                {!s.isLocked &&
+                                  s.reviewStatus !== "REVIEWED" &&
+                                  s.reviewStatus !== "APPROVED" && (
+                                    <button
+                                      type="button"
+                                      disabled={updatingSectionMetaId === s.id}
+                                      onClick={() =>
+                                        handleSectionMeta(
+                                          s.id,
+                                          { reviewStatus: "REVIEWED" },
+                                          "Section marked as reviewed."
+                                        )
+                                      }
+                                      className="rounded-full border border-line bg-surface px-2.5 py-1 text-xs font-medium text-ink-soft transition-colors hover:border-accent-300 hover:text-accent-700 disabled:opacity-50"
+                                    >
+                                      Mark reviewed
+                                    </button>
+                                  )}
+                                {!s.isLocked && s.reviewStatus !== "APPROVED" && (
+                                  <button
+                                    type="button"
+                                    disabled={updatingSectionMetaId === s.id}
+                                    onClick={() =>
+                                      handleSectionMeta(
+                                        s.id,
+                                        { reviewStatus: "APPROVED", isLocked: true },
+                                        "Section approved and locked."
+                                      )
+                                    }
+                                    className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 transition-colors hover:bg-emerald-100 disabled:opacity-50"
+                                  >
+                                    Approve &amp; lock
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  disabled={updatingSectionMetaId === s.id}
+                                  onClick={() =>
+                                    handleSectionMeta(
+                                      s.id,
+                                      { isLocked: !s.isLocked },
+                                      s.isLocked
+                                        ? "Section unlocked."
+                                        : "Section locked."
+                                    )
+                                  }
+                                  className="inline-flex items-center gap-1 rounded-full border border-line bg-surface px-2.5 py-1 text-xs font-medium text-ink-soft transition-colors hover:border-ink/20 hover:text-ink disabled:opacity-50"
+                                >
+                                  <Icon name="lock" size={12} />
+                                  {s.isLocked ? "Unlock" : "Lock"}
+                                </button>
+                              </div>
+                            )}
 
                             {editingSectionId === s.id ? (
                               <div className="mt-3">

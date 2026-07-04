@@ -24,6 +24,21 @@ export const SECTION_STATUSES: SectionStatus[] = [
   "LOCKED",
 ];
 
+export type ReviewStatus =
+  | "DRAFT"
+  | "IN_REVIEW"
+  | "REVIEWED"
+  | "APPROVED"
+  | "NEEDS_CHANGES";
+
+export const REVIEW_STATUSES: ReviewStatus[] = [
+  "DRAFT",
+  "IN_REVIEW",
+  "REVIEWED",
+  "APPROVED",
+  "NEEDS_CHANGES",
+];
+
 export function countWords(text: string | null | undefined): number {
   const t = (text || "").trim();
   return t ? t.split(/\s+/).length : 0;
@@ -71,6 +86,11 @@ export interface SectionDTO {
   editedAt: string | null;
   lastRewriteInstruction: string | null;
   rewriteCount: number;
+  reviewStatus: ReviewStatus;
+  isLocked: boolean;
+  lockedAt: string | null;
+  reviewedAt: string | null;
+  approvedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -100,10 +120,91 @@ export function serializeSection(section: DocumentSection): SectionDTO {
     editedAt: section.editedAt ? section.editedAt.toISOString() : null,
     lastRewriteInstruction: section.lastRewriteInstruction,
     rewriteCount: section.rewriteCount,
+    reviewStatus: (section.reviewStatus as ReviewStatus) || "DRAFT",
+    isLocked: section.isLocked,
+    lockedAt: section.lockedAt ? section.lockedAt.toISOString() : null,
+    reviewedAt: section.reviewedAt ? section.reviewedAt.toISOString() : null,
+    approvedAt: section.approvedAt ? section.approvedAt.toISOString() : null,
     createdAt: section.createdAt.toISOString(),
     updatedAt: section.updatedAt.toISOString(),
   };
 }
+
+/* -------------------------------------------------- Review / readiness */
+
+export function isSectionLocked(section: { isLocked?: boolean }): boolean {
+  return Boolean(section.isLocked);
+}
+
+export interface SectionReadiness {
+  total: number;
+  withContent: number;
+  generated: number;
+  edited: number;
+  reviewed: number;
+  approved: number;
+  locked: number;
+  failed: number;
+}
+
+export function summarizeSectionReadiness(
+  sections: Pick<
+    SectionDTO,
+    "status" | "reviewStatus" | "isLocked" | "content"
+  >[]
+): SectionReadiness {
+  return sections.reduce<SectionReadiness>(
+    (acc, s) => {
+      acc.total += 1;
+      if (s.content && s.content.trim()) acc.withContent += 1;
+      if (s.status === "GENERATED") acc.generated += 1;
+      if (s.status === "EDITED") acc.edited += 1;
+      if (s.status === "FAILED") acc.failed += 1;
+      if (s.reviewStatus === "REVIEWED") acc.reviewed += 1;
+      if (s.reviewStatus === "APPROVED") acc.approved += 1;
+      if (s.isLocked) acc.locked += 1;
+      return acc;
+    },
+    {
+      total: 0,
+      withContent: 0,
+      generated: 0,
+      edited: 0,
+      reviewed: 0,
+      approved: 0,
+      locked: 0,
+      failed: 0,
+    }
+  );
+}
+
+/**
+ * The assembled document is stale when there is section content but it was
+ * never assembled, or a section changed after the last assembly.
+ */
+export function isDocumentStale(
+  assembledAt: string | null,
+  sections: Pick<SectionDTO, "content" | "updatedAt">[]
+): boolean {
+  const withContent = sections.filter((s) => s.content && s.content.trim());
+  if (!withContent.length) return false;
+  if (!assembledAt) return true;
+  const assembled = new Date(assembledAt).getTime();
+  return withContent.some(
+    (s) => new Date(s.updatedAt).getTime() > assembled
+  );
+}
+
+export const REVIEW_STATUS_UI: Record<
+  ReviewStatus,
+  { label: string; tone: "success" | "accent" | "warning" | "danger" | "neutral" }
+> = {
+  DRAFT: { label: "Draft", tone: "neutral" },
+  IN_REVIEW: { label: "Needs review", tone: "warning" },
+  REVIEWED: { label: "Reviewed", tone: "accent" },
+  APPROVED: { label: "Approved", tone: "success" },
+  NEEDS_CHANGES: { label: "Needs changes", tone: "warning" },
+};
 
 /** Metadata payload derived from a plan section (JSON fields for Prisma). */
 export function planSectionToData(section: PlanSection, orderIndex: number) {

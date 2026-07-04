@@ -179,6 +179,7 @@ async function generateOneRaw(
       data: {
         content: outcome.content,
         status: "GENERATED",
+        reviewStatus: "IN_REVIEW",
         model: outcome.model,
         generatedAt: new Date(),
       },
@@ -241,8 +242,8 @@ export async function generateSingleSection(
   );
   const target = sections.find((s) => s.id === sectionId);
   if (!target) return { error: "Section not found", code: 404 };
-  if (target.status === "LOCKED") {
-    return { error: "This section is locked and cannot be regenerated." };
+  if (target.isLocked) {
+    return { error: "Section is locked. Unlock it before regenerating." };
   }
 
   const result = await generateOneRaw(
@@ -282,8 +283,8 @@ export async function rewriteSectionById(
       error: "Generate this section before asking AI to rewrite it.",
     };
   }
-  if (section.status === "LOCKED") {
-    return { error: "This section is locked and cannot be rewritten." };
+  if (section.isLocked) {
+    return { error: "Section is locked. Unlock it before rewriting." };
   }
 
   const previousStatus = section.status;
@@ -325,6 +326,7 @@ export async function rewriteSectionById(
       data: {
         content: outcome.content,
         status: "EDITED",
+        reviewStatus: "NEEDS_CHANGES",
         model: outcome.model,
         editedAt: new Date(),
         rewrittenAt: new Date(),
@@ -362,7 +364,13 @@ export async function generateSectionsFromPlan(
   document: Document,
   mode: "missing" | "all"
 ): Promise<
-  | { sections: SectionDTO[]; generated: number; failed: number; skipped: number }
+  | {
+      sections: SectionDTO[];
+      generated: number;
+      failed: number;
+      skippedLocked: number;
+      skippedExisting: number;
+    }
   | { error: string }
 > {
   if (!hasOpenAIKey()) {
@@ -378,20 +386,22 @@ export async function generateSectionsFromPlan(
     return { error: "No sections yet. Sync sections from the plan first." };
   }
 
-  const isTarget = (s: DocumentSection) => {
-    if (s.status === "LOCKED") return false;
-    if (mode === "all") return true;
-    // "missing": no content yet or previously failed.
-    return !s.content || !s.content.trim() || s.status === "FAILED";
-  };
+  const hasContent = (s: DocumentSection) => Boolean(s.content && s.content.trim());
 
   let generated = 0;
   let failed = 0;
-  let skipped = 0;
+  let skippedLocked = 0;
+  let skippedExisting = 0;
 
   for (const section of sections) {
-    if (!isTarget(section)) {
-      skipped += 1;
+    // Locked sections are always protected from batch generation.
+    if (section.isLocked) {
+      skippedLocked += 1;
+      continue;
+    }
+    // "missing" mode leaves already-generated content in place.
+    if (mode === "missing" && hasContent(section) && section.status !== "FAILED") {
+      skippedExisting += 1;
       continue;
     }
     // Re-read for freshest allSections context as we go.
@@ -415,7 +425,8 @@ export async function generateSectionsFromPlan(
     sections: await listSectionDTOs(document.id),
     generated,
     failed,
-    skipped,
+    skippedLocked,
+    skippedExisting,
   };
 }
 
@@ -424,7 +435,13 @@ export async function generateSectionsFromPlan(
 export async function assembleDocument(
   document: Document
 ): Promise<
-  | { content: string; sectionsIncluded: number; sectionsSkipped: number; totalWords: number }
+  | {
+      content: string;
+      sectionsIncluded: number;
+      sectionsSkipped: number;
+      totalWords: number;
+      assembledAt: string;
+    }
   | { error: string }
 > {
   const sections = await prisma.documentSection.findMany({
@@ -435,20 +452,23 @@ export async function assembleDocument(
     return { error: "No sections to assemble. Generate sections first." };
   }
 
+  // Locked sections are included in the assembled document.
   const result = assembleSections(sections, { documentTitle: document.title });
   if (!result.sectionsIncluded) {
     return { error: "No generated section content to assemble yet." };
   }
 
+  const assembledAt = new Date();
   await prisma.document.update({
     where: { id: document.id },
     data: {
       content: result.content,
       status: DocumentStatus.READY_FOR_REVIEW,
+      assembledAt,
     },
   });
 
-  return result;
+  return { ...result, assembledAt: assembledAt.toISOString() };
 }
 
 export function markSectionStatus(status: string): SectionStatus {

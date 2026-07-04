@@ -6,6 +6,8 @@ import {
 import { prisma } from "../../../../../../../lib/prisma";
 import { getOwnedContext } from "../../../../../../../lib/documents/section-service";
 import {
+  REVIEW_STATUSES,
+  ReviewStatus,
   SectionStatus,
   serializeSection,
 } from "../../../../../../../lib/documents/document-sections";
@@ -56,22 +58,61 @@ export default withAuth(
           .json({ success: false, message: "Section not found" });
       }
 
-      const body = (req.body ?? {}) as { content?: unknown; status?: unknown };
+      const body = (req.body ?? {}) as {
+        content?: unknown;
+        status?: unknown;
+        reviewStatus?: unknown;
+        isLocked?: unknown;
+      };
       const data: {
         content?: string;
         status?: string;
         editedAt?: Date;
+        reviewStatus?: string;
+        reviewedAt?: Date;
+        approvedAt?: Date;
+        isLocked?: boolean;
+        lockedAt?: Date;
       } = {};
 
+      const now = new Date();
+
+      // Content / manual edits are blocked on locked sections.
       if (body.content !== undefined) {
         if (typeof body.content !== "string") {
           return res
             .status(400)
             .json({ success: false, message: "Content must be a string" });
         }
+        if (section.isLocked && body.isLocked !== false) {
+          return res.status(409).json({
+            success: false,
+            message: "Section is locked. Unlock it before editing.",
+          });
+        }
         data.content = body.content;
         data.status = "EDITED";
-        data.editedAt = new Date();
+        data.reviewStatus = "NEEDS_CHANGES";
+        data.editedAt = now;
+      }
+
+      if (body.reviewStatus !== undefined) {
+        if (
+          typeof body.reviewStatus !== "string" ||
+          !REVIEW_STATUSES.includes(body.reviewStatus as ReviewStatus)
+        ) {
+          return res
+            .status(400)
+            .json({ success: false, message: "Invalid review status" });
+        }
+        data.reviewStatus = body.reviewStatus;
+        if (body.reviewStatus === "REVIEWED") data.reviewedAt = now;
+        if (body.reviewStatus === "APPROVED") data.approvedAt = now;
+      }
+
+      if (typeof body.isLocked === "boolean") {
+        data.isLocked = body.isLocked;
+        if (body.isLocked) data.lockedAt = now;
       }
 
       if (
