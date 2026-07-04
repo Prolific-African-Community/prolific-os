@@ -141,6 +141,7 @@ model Document {
 
   resources      Resource[]
   generationRuns GenerationRun[]
+  sections       DocumentSection[]
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
 
@@ -148,6 +149,42 @@ model Document {
   @@index([templateId])
   @@index([status])
   @@index([type])
+}
+
+// Section-based generation (Ticket 023): each planned section is stored and
+// generated independently, then assembled into Document.content.
+model DocumentSection {
+  id            String    @id @default(cuid())
+  documentId    String
+  document      Document  @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  planSectionId String?
+  orderIndex    Int
+
+  title         String
+  level         Int       @default(2)
+  purpose       String?
+  targetWords   Int?
+
+  sourceBriefs  Json?
+  keyFacts      Json?
+  keyFigures    Json?
+  tables        Json?
+  risks         Json?
+  assumptions   Json?
+  openQuestions Json?
+
+  content       String?
+  status        String    @default("PLANNED")
+  model         String?
+  generatedAt   DateTime?
+  editedAt      DateTime?
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([documentId])
+  @@index([documentId, orderIndex])
 }
 
 model GenerationRun {

@@ -24,6 +24,10 @@ import {
   DocumentPlanStatus,
   planKeyFigureCount,
 } from "../../../../../lib/documents/document-plan";
+import {
+  SECTION_STATUS_UI,
+  SectionDTO,
+} from "../../../../../lib/documents/document-sections";
 
 type DocumentStatus =
   | "DRAFT"
@@ -142,6 +146,19 @@ export default function DocumentDetailPage() {
   const [planning, setPlanning] = useState(false);
   const [planError, setPlanError] = useState<string | null>(null);
   const [showPlan, setShowPlan] = useState(false);
+  const [sections, setSections] = useState<SectionDTO[]>([]);
+  const [sectionsLoading, setSectionsLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
+  const [generatingAll, setGeneratingAll] = useState(false);
+  const [assembling, setAssembling] = useState(false);
+  const [generatingSectionId, setGeneratingSectionId] = useState<string | null>(
+    null
+  );
+  const [editingSectionId, setEditingSectionId] = useState<string | null>(null);
+  const [sectionEdit, setSectionEdit] = useState("");
+  const [savingSectionId, setSavingSectionId] = useState<string | null>(null);
+  const [sectionsError, setSectionsError] = useState<string | null>(null);
+  const [sectionsNote, setSectionsNote] = useState<string | null>(null);
   const [exportingMarkdown, setExportingMarkdown] = useState(false);
   const [exportingDocx, setExportingDocx] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
@@ -177,6 +194,31 @@ export default function DocumentDetailPage() {
       throw new Error(payload.message || "Unable to complete request");
     }
     return payload.data as T;
+  };
+
+  const requestFull = async <T,>(url: string, options: RequestInit = {}) => {
+    const token = localStorage.getItem("token");
+    if (!token) {
+      router.replace("/login");
+      throw new Error("Your session has expired. Please sign in again.");
+    }
+    const response = await fetch(url, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options.headers,
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    const payload = (await response.json()) as ApiResponse<T>;
+    if (response.status === 401) {
+      localStorage.removeItem("token");
+      router.replace("/login");
+    }
+    if (!response.ok || !payload.success) {
+      throw new Error(payload.message || "Unable to complete request");
+    }
+    return { data: payload.data as T, message: payload.message };
   };
 
   const loadTemplates = async () => {
@@ -258,6 +300,7 @@ export default function DocumentDetailPage() {
     loadProjectMeta();
     loadDocument();
     loadRuns();
+    loadSections();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router.isReady, projectId, documentId]);
 
@@ -343,6 +386,128 @@ export default function DocumentDetailPage() {
       );
     } finally {
       setPlanning(false);
+    }
+  };
+
+  const sectionsBase = () =>
+    `/api/projects/${projectId}/documents/${documentId}/sections`;
+
+  const loadSections = async () => {
+    if (!projectId || !documentId) return;
+    try {
+      const data = await request<SectionDTO[]>(sectionsBase());
+      setSections(data);
+    } catch {
+      // Non-fatal: the sections panel simply shows an empty state.
+    } finally {
+      setSectionsLoading(false);
+    }
+  };
+
+  const handleSyncSections = async () => {
+    setSyncing(true);
+    setSectionsError(null);
+    setSectionsNote(null);
+    try {
+      const { data, message } = await requestFull<SectionDTO[]>(
+        `${sectionsBase()}/sync-from-plan`,
+        { method: "POST" }
+      );
+      setSections(data);
+      setSectionsNote(message ?? "Sections synced from plan.");
+    } catch (err) {
+      setSectionsError(
+        err instanceof Error ? err.message : "Unable to sync sections"
+      );
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const handleGenerateSection = async (id: string) => {
+    setGeneratingSectionId(id);
+    setSectionsError(null);
+    setSectionsNote(null);
+    try {
+      const section = await request<SectionDTO>(
+        `${sectionsBase()}/${id}/generate`,
+        { method: "POST" }
+      );
+      setSections((cur) => cur.map((s) => (s.id === id ? section : s)));
+    } catch (err) {
+      setSectionsError(
+        err instanceof Error ? err.message : "Unable to generate section"
+      );
+    } finally {
+      setGeneratingSectionId(null);
+    }
+  };
+
+  const handleGenerateSections = async (mode: "missing" | "all") => {
+    setGeneratingAll(true);
+    setSectionsError(null);
+    setSectionsNote(null);
+    try {
+      const { data, message } = await requestFull<{ sections: SectionDTO[] }>(
+        `${sectionsBase()}/generate`,
+        { method: "POST", body: JSON.stringify({ mode }) }
+      );
+      setSections(data.sections);
+      setSectionsNote(message ?? "Sections generated.");
+    } catch (err) {
+      setSectionsError(
+        err instanceof Error ? err.message : "Unable to generate sections"
+      );
+    } finally {
+      setGeneratingAll(false);
+    }
+  };
+
+  const handleAssemble = async () => {
+    setAssembling(true);
+    setSectionsError(null);
+    setSectionsNote(null);
+    try {
+      const { data, message } = await requestFull<{ content: string }>(
+        `${sectionsBase()}/assemble`,
+        { method: "POST" }
+      );
+      setForm((cur) => ({ ...cur, content: data.content }));
+      setDocument((cur) =>
+        cur ? { ...cur, content: data.content, status: "READY_FOR_REVIEW" } : cur
+      );
+      setSectionsNote(message ?? "Document assembled from sections.");
+      setView("preview");
+    } catch (err) {
+      setSectionsError(
+        err instanceof Error ? err.message : "Unable to assemble document"
+      );
+    } finally {
+      setAssembling(false);
+    }
+  };
+
+  const startSectionEdit = (section: SectionDTO) => {
+    setEditingSectionId(section.id);
+    setSectionEdit(section.content || "");
+  };
+
+  const handleSaveSection = async (id: string) => {
+    setSavingSectionId(id);
+    setSectionsError(null);
+    try {
+      const section = await request<SectionDTO>(`${sectionsBase()}/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ content: sectionEdit }),
+      });
+      setSections((cur) => cur.map((s) => (s.id === id ? section : s)));
+      setEditingSectionId(null);
+    } catch (err) {
+      setSectionsError(
+        err instanceof Error ? err.message : "Unable to save section"
+      );
+    } finally {
+      setSavingSectionId(null);
     }
   };
 
@@ -711,6 +876,189 @@ export default function DocumentDetailPage() {
                       </Button>
                     </div>
                   </div>
+                )}
+              </Card>
+
+              {/* Sections */}
+              <Card className="p-6">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-accent-600">
+                      <Icon name="layers" size={14} />
+                      Sections
+                    </div>
+                    <p className="mt-2 max-w-md text-sm leading-6 text-ink-muted">
+                      Generate the document section by section from the plan, then
+                      assemble. Regenerate or edit any section without touching the
+                      others.
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    icon="layers"
+                    loading={syncing}
+                    onClick={handleSyncSections}
+                  >
+                    {sections.length ? "Sync from plan" : "Create from plan"}
+                  </Button>
+                </div>
+
+                {sectionsError && (
+                  <Alert tone="danger" className="mt-4">
+                    {sectionsError}
+                  </Alert>
+                )}
+                {sectionsNote && !sectionsError && (
+                  <Alert tone="info" className="mt-4">
+                    {sectionsNote}
+                  </Alert>
+                )}
+
+                {sectionsLoading ? (
+                  <div className="mt-4 space-y-2">
+                    {Array.from({ length: 3 }).map((_, i) => (
+                      <Skeleton key={i} className="h-16" />
+                    ))}
+                  </div>
+                ) : !sections.length ? (
+                  <div className="mt-4 rounded-xl border border-dashed border-line bg-ink/[0.015] px-4 py-6 text-center text-sm text-ink-muted">
+                    No sections yet. Generate a document plan, then sync sections
+                    from it to generate the document piece by piece.
+                  </div>
+                ) : (
+                  <>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        icon="generate"
+                        loading={generatingAll}
+                        onClick={() => handleGenerateSections("missing")}
+                      >
+                        Generate missing
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleGenerateSections("all")}
+                        disabled={generatingAll}
+                      >
+                        Regenerate all
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        icon="check"
+                        loading={assembling}
+                        onClick={handleAssemble}
+                      >
+                        Assemble document
+                      </Button>
+                    </div>
+
+                    <div className="mt-4 space-y-3">
+                      {sections.map((s, index) => {
+                        const ui = SECTION_STATUS_UI[s.status];
+                        const busy = generatingSectionId === s.id;
+                        return (
+                          <div
+                            key={s.id}
+                            className="rounded-xl border border-line p-4"
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="text-xs font-semibold text-ink-faint">
+                                    {index + 1}.
+                                  </span>
+                                  <h4 className="text-sm font-semibold tracking-tight text-ink">
+                                    {s.title}
+                                  </h4>
+                                  <Badge tone={ui.tone}>{ui.label}</Badge>
+                                </div>
+                                <div className="mt-1.5 flex flex-wrap gap-3 text-xs text-ink-muted">
+                                  <span>
+                                    {s.wordCount}
+                                    {s.targetWords ? `/${s.targetWords}` : ""} words
+                                  </span>
+                                  {s.sourceBriefs.length > 0 && (
+                                    <span>{s.sourceBriefs.length} sources</span>
+                                  )}
+                                  {s.keyFigures.length > 0 && (
+                                    <span>{s.keyFigures.length} figures</span>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="flex shrink-0 gap-1.5">
+                                <button
+                                  type="button"
+                                  disabled={busy}
+                                  onClick={() => handleGenerateSection(s.id)}
+                                  title={s.content ? "Regenerate" : "Generate"}
+                                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-line text-ink-muted transition-colors hover:border-accent-300 hover:text-accent-700 disabled:opacity-50"
+                                >
+                                  {busy ? (
+                                    <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-accent-500 border-t-transparent" />
+                                  ) : (
+                                    <Icon name="generate" size={15} />
+                                  )}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    editingSectionId === s.id
+                                      ? setEditingSectionId(null)
+                                      : startSectionEdit(s)
+                                  }
+                                  title="Edit"
+                                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-line text-ink-muted transition-colors hover:border-ink/20 hover:text-ink"
+                                >
+                                  <Icon name="edit" size={15} />
+                                </button>
+                              </div>
+                            </div>
+
+                            {editingSectionId === s.id ? (
+                              <div className="mt-3">
+                                <Textarea
+                                  value={sectionEdit}
+                                  onChange={(e) => setSectionEdit(e.target.value)}
+                                  className="min-h-[180px] font-mono text-[13px] leading-6"
+                                />
+                                <div className="mt-2 flex gap-2">
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    icon="check"
+                                    loading={savingSectionId === s.id}
+                                    onClick={() => handleSaveSection(s.id)}
+                                  >
+                                    Save section
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={() => setEditingSectionId(null)}
+                                  >
+                                    Cancel
+                                  </Button>
+                                </div>
+                              </div>
+                            ) : s.content ? (
+                              <div className="mt-3 max-h-56 overflow-auto rounded-lg bg-ink/[0.02] p-3">
+                                <MarkdownPreview content={s.content} />
+                              </div>
+                            ) : null}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
                 )}
               </Card>
             </div>
