@@ -3,6 +3,7 @@ import type { Document, DocumentSection, Project } from "@prisma/client";
 import { prisma } from "../prisma";
 import { hasOpenAIKey } from "../ai/openai";
 import { generateSection } from "../ai/section-generation";
+import { RewriteMode, rewriteSection } from "../ai/section-rewrite";
 import { sanitizeDocumentPlan } from "./document-plan";
 import {
   SectionDTO,
@@ -259,6 +260,101 @@ export async function generateSingleSection(
   if (!refreshed) return { error: "Section not found", code: 404 };
   if (!result.ok) return { error: result.message };
   return { section: serializeSection(refreshed) };
+}
+
+export async function rewriteSectionById(
+  project: Project,
+  document: Document,
+  sectionId: string,
+  instruction: string,
+  mode: RewriteMode
+): Promise<{ section: SectionDTO } | { error: string; code?: number }> {
+  if (!hasOpenAIKey()) {
+    return { error: "Rewrite failed. Check OpenAI configuration." };
+  }
+
+  const section = await prisma.documentSection.findFirst({
+    where: { id: sectionId, documentId: document.id },
+  });
+  if (!section) return { error: "Section not found", code: 404 };
+  if (!section.content || !section.content.trim()) {
+    return {
+      error: "Generate this section before asking AI to rewrite it.",
+    };
+  }
+  if (section.status === "LOCKED") {
+    return { error: "This section is locked and cannot be rewritten." };
+  }
+
+  const previousStatus = section.status;
+  const [knowledgeItems, resources] = await Promise.all([
+    prisma.projectKnowledge.findMany({
+      where: { projectId: project.id },
+      orderBy: { updatedAt: "desc" },
+    }),
+    prisma.resource.findMany({
+      where: { projectId: project.id },
+      orderBy: { updatedAt: "desc" },
+    }),
+  ]);
+
+  await prisma.documentSection.update({
+    where: { id: sectionId },
+    data: { status: "GENERATING" },
+  });
+
+  const run = await prisma.generationRun.create({
+    data: {
+      documentId: document.id,
+      provider: "openai",
+      model: "openai",
+      status: GenerationRunStatus.RUNNING,
+      inputSummary: `Rewrite [${mode}]: ${section.title} (${section.id}) — ${instruction.slice(0, 160)}`,
+    },
+  });
+
+  try {
+    const outcome = await rewriteSection(
+      { project, document, section, knowledgeItems, resources },
+      instruction,
+      mode
+    );
+
+    const updated = await prisma.documentSection.update({
+      where: { id: sectionId },
+      data: {
+        content: outcome.content,
+        status: "EDITED",
+        model: outcome.model,
+        editedAt: new Date(),
+        rewrittenAt: new Date(),
+        lastRewriteInstruction: instruction.slice(0, 2000),
+        rewriteCount: { increment: 1 },
+      },
+    });
+    await prisma.generationRun.update({
+      where: { id: run.id },
+      data: {
+        model: outcome.model,
+        status: GenerationRunStatus.SUCCEEDED,
+        output: `Rewrote « ${section.title} » — ${outcome.words} words.`,
+      },
+    });
+    return { section: serializeSection(updated) };
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Section rewrite failed";
+    // Preserve existing content; restore the prior status.
+    await prisma.documentSection.update({
+      where: { id: sectionId },
+      data: { status: previousStatus },
+    });
+    await prisma.generationRun.update({
+      where: { id: run.id },
+      data: { status: GenerationRunStatus.FAILED, error: message },
+    });
+    return { error: `${message} Existing section content was preserved.` };
+  }
 }
 
 export async function generateSectionsFromPlan(

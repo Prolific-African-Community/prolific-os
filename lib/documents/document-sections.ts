@@ -69,6 +69,8 @@ export interface SectionDTO {
   wordCount: number;
   generatedAt: string | null;
   editedAt: string | null;
+  lastRewriteInstruction: string | null;
+  rewriteCount: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -96,6 +98,8 @@ export function serializeSection(section: DocumentSection): SectionDTO {
     wordCount: countWords(section.content),
     generatedAt: section.generatedAt ? section.generatedAt.toISOString() : null,
     editedAt: section.editedAt ? section.editedAt.toISOString() : null,
+    lastRewriteInstruction: section.lastRewriteInstruction,
+    rewriteCount: section.rewriteCount,
     createdAt: section.createdAt.toISOString(),
     updatedAt: section.updatedAt.toISOString(),
   };

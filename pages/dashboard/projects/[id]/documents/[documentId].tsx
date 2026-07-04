@@ -126,6 +126,43 @@ const initialForm = (): DocumentDetailForm => ({
 const deepClone = <T,>(value: T): T =>
   JSON.parse(JSON.stringify(value)) as T;
 
+const REWRITE_QUICK_ACTIONS: {
+  label: string;
+  instruction: string;
+  mode: string;
+}[] = [
+  {
+    label: "More professional",
+    instruction:
+      "Rends cette section plus professionnelle, structurée et adaptée à un document livré à des partenaires externes.",
+    mode: "professionalize",
+  },
+  {
+    label: "More concise",
+    instruction:
+      "Réduis cette section d'environ 30 % en conservant les informations importantes et les chiffres exacts.",
+    mode: "shorten",
+  },
+  {
+    label: "Add a table",
+    instruction:
+      "Ajoute un tableau clair si cela améliore la lisibilité, sans inventer de données.",
+    mode: "add_table",
+  },
+  {
+    label: "More operational",
+    instruction:
+      "Ajoute les implications opérationnelles concrètes, les responsabilités et les points de mise en œuvre.",
+    mode: "make_operational",
+  },
+  {
+    label: "More executive",
+    instruction:
+      "Reformule cette section avec un ton plus synthétique et stratégique, adapté à un comité de direction ou un financeur.",
+    mode: "make_executive",
+  },
+];
+
 export default function DocumentDetailPage() {
   const router = useRouter();
   const projectId =
@@ -169,6 +206,11 @@ export default function DocumentDetailPage() {
   const [editingSectionId, setEditingSectionId] = useState<string | null>(null);
   const [sectionEdit, setSectionEdit] = useState("");
   const [savingSectionId, setSavingSectionId] = useState<string | null>(null);
+  const [rewriteOpenId, setRewriteOpenId] = useState<string | null>(null);
+  const [rewriteText, setRewriteText] = useState("");
+  const [rewritingSectionId, setRewritingSectionId] = useState<string | null>(
+    null
+  );
   const [sectionsError, setSectionsError] = useState<string | null>(null);
   const [sectionsNote, setSectionsNote] = useState<string | null>(null);
   const [exportingMarkdown, setExportingMarkdown] = useState(false);
@@ -546,6 +588,44 @@ export default function DocumentDetailPage() {
       );
     } finally {
       setGeneratingSectionId(null);
+    }
+  };
+
+  const openRewrite = (section: SectionDTO) => {
+    setRewriteOpenId(section.id);
+    setRewriteText(section.lastRewriteInstruction || "");
+    setSectionsError(null);
+    setSectionsNote(null);
+  };
+
+  const handleRewriteSection = async (
+    id: string,
+    instruction: string,
+    mode: string
+  ) => {
+    if (!instruction.trim()) {
+      setSectionsError("Add an instruction before rewriting.");
+      return;
+    }
+    setRewritingSectionId(id);
+    setSectionsError(null);
+    setSectionsNote(null);
+    try {
+      const { data, message } = await requestFull<SectionDTO>(
+        `${sectionsBase()}/${id}/rewrite`,
+        { method: "POST", body: JSON.stringify({ instruction, mode }) }
+      );
+      setSections((cur) => cur.map((s) => (s.id === id ? data : s)));
+      setSectionsNote(
+        message ??
+          "Section rewritten. Re-assemble to update the final document."
+      );
+    } catch (err) {
+      setSectionsError(
+        err instanceof Error ? err.message : "Unable to rewrite section"
+      );
+    } finally {
+      setRewritingSectionId(null);
     }
   };
 
@@ -1142,6 +1222,25 @@ export default function DocumentDetailPage() {
                                     <Icon name="generate" size={15} />
                                   )}
                                 </button>
+                                {s.content && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      rewriteOpenId === s.id
+                                        ? setRewriteOpenId(null)
+                                        : openRewrite(s)
+                                    }
+                                    title="Improve with AI"
+                                    className={cn(
+                                      "flex h-8 w-8 items-center justify-center rounded-lg border transition-colors",
+                                      rewriteOpenId === s.id
+                                        ? "border-accent-300 bg-accent-50 text-accent-700"
+                                        : "border-line text-ink-muted hover:border-accent-300 hover:text-accent-700"
+                                    )}
+                                  >
+                                    <Icon name="sparkles" size={15} />
+                                  </button>
+                                )}
                                 <button
                                   type="button"
                                   onClick={() =>
@@ -1189,6 +1288,66 @@ export default function DocumentDetailPage() {
                                 <MarkdownPreview content={s.content} />
                               </div>
                             ) : null}
+
+                            {rewriteOpenId === s.id && s.content && (
+                              <div className="mt-3 rounded-lg border border-accent-100 bg-accent-50/40 p-3">
+                                <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-accent-600">
+                                  <Icon name="sparkles" size={13} />
+                                  Improve with AI
+                                </div>
+                                <Textarea
+                                  value={rewriteText}
+                                  onChange={(e) => setRewriteText(e.target.value)}
+                                  placeholder="Tell AI how to improve this section… e.g. « Rends cette section plus concise et ajoute un tableau de phasage. »"
+                                  className="mt-2 min-h-[68px] bg-surface text-sm"
+                                />
+                                <div className="mt-2 flex flex-wrap gap-1.5">
+                                  {REWRITE_QUICK_ACTIONS.map((q) => (
+                                    <button
+                                      key={q.label}
+                                      type="button"
+                                      disabled={rewritingSectionId === s.id}
+                                      onClick={() =>
+                                        handleRewriteSection(
+                                          s.id,
+                                          q.instruction,
+                                          q.mode
+                                        )
+                                      }
+                                      className="rounded-full border border-line bg-surface px-2.5 py-1 text-xs font-medium text-ink-soft transition-colors hover:border-accent-300 hover:text-accent-700 disabled:opacity-50"
+                                    >
+                                      {q.label}
+                                    </button>
+                                  ))}
+                                </div>
+                                <div className="mt-2.5 flex gap-2">
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    icon="sparkles"
+                                    loading={rewritingSectionId === s.id}
+                                    disabled={!rewriteText.trim()}
+                                    onClick={() =>
+                                      handleRewriteSection(
+                                        s.id,
+                                        rewriteText,
+                                        "rewrite"
+                                      )
+                                    }
+                                  >
+                                    Rewrite section
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={() => setRewriteOpenId(null)}
+                                  >
+                                    Close
+                                  </Button>
+                                </div>
+                              </div>
+                            )}
                           </div>
                         );
                       })}

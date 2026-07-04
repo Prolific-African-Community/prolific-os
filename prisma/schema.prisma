@@ -182,6 +182,11 @@ model DocumentSection {
   generatedAt   DateTime?
   editedAt      DateTime?
 
+  // Ticket 026: targeted rewrite memory/tracking (additive, nullable).
+  lastRewriteInstruction String?
+  rewriteCount           Int       @default(0)
+  rewrittenAt            DateTime?
+
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 

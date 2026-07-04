@@ -51,7 +51,7 @@ function buildSystemPrompt(): string {
   ].join("\n");
 }
 
-function matchResources(
+export function matchResources(
   sourceBriefs: string[],
   resources: Resource[]
 ): Resource[] {
@@ -65,7 +65,7 @@ function matchResources(
   });
 }
 
-function sourceText(resources: Resource[], excerptChars: number): string {
+export function sourceText(resources: Resource[], excerptChars: number): string {
   if (!resources.length) return "None assigned.";
   return resources
     .map((r, i) => {
