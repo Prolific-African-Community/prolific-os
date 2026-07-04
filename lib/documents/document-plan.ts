@@ -418,6 +418,49 @@ export function planSectionCount(plan: DocumentPlan | null | undefined): number 
   return plan?.sections?.length ?? 0;
 }
 
+export function planTotalTargetWords(
+  plan: DocumentPlan | null | undefined
+): number {
+  return (
+    plan?.sections?.reduce((sum, s) => sum + (s.targetWords || 0), 0) ?? 0
+  );
+}
+
+/** A blank section for manual "add section" in the plan editor. */
+export function emptyPlanSection(index: number): PlanSection {
+  return {
+    id: `manual-${Date.now()}-${index}`,
+    title: "New section",
+    level: 2,
+    purpose: "",
+    targetWords: 300,
+    sourceBriefs: [],
+    keyFacts: [],
+    keyFigures: [],
+    tables: [],
+    visualIdeas: [],
+    risks: [],
+    assumptions: [],
+    openQuestions: [],
+    acceptanceCriteria: [],
+  };
+}
+
+/**
+ * Out-of-sync when sections exist and the plan was changed after it was last
+ * applied to those sections (or was never applied).
+ */
+export function isPlanOutOfSync(args: {
+  sectionsExist: boolean;
+  planUpdatedAt: string | null;
+  planAppliedAt: string | null;
+}): boolean {
+  if (!args.sectionsExist) return false;
+  if (!args.planAppliedAt) return true;
+  if (!args.planUpdatedAt) return false;
+  return new Date(args.planUpdatedAt).getTime() > new Date(args.planAppliedAt).getTime();
+}
+
 export function planKeyFigureCount(plan: DocumentPlan | null | undefined): number {
   return (
     plan?.sections?.reduce((sum, s) => sum + (s.keyFigures?.length || 0), 0) ?? 0

@@ -62,6 +62,9 @@ const serializeDocument = (document: DocumentWithTemplate) => ({
   documentPlanUpdatedAt: document.documentPlanUpdatedAt
     ? document.documentPlanUpdatedAt.toISOString()
     : null,
+  documentPlanAppliedAt: document.documentPlanAppliedAt
+    ? document.documentPlanAppliedAt.toISOString()
+    : null,
   createdAt: document.createdAt.toISOString(),
   updatedAt: document.updatedAt.toISOString(),
 });

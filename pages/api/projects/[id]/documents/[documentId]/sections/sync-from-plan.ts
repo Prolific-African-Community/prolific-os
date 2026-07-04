@@ -42,8 +42,9 @@ export default withAuth(
 
       return res.status(200).json({
         success: true,
-        message: `Synced ${result.created} new and ${result.updated} existing sections.`,
-        data: result.sections,
+        message:
+          "Plan applied. Existing generated content was preserved.",
+        data: { sections: result.sections, appliedAt: result.appliedAt },
       });
     } catch (error) {
       console.error("SYNC SECTIONS ERROR:", error);

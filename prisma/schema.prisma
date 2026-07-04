@@ -138,6 +138,8 @@ model Document {
   documentPlanStatus    String?
   documentPlanModel     String?
   documentPlanUpdatedAt DateTime?
+  // Ticket 025: when the plan was last applied to sections (for out-of-sync detection).
+  documentPlanAppliedAt DateTime?
 
   resources      Resource[]
   generationRuns GenerationRun[]

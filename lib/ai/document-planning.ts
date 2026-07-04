@@ -303,3 +303,134 @@ export async function planDocument(ctx: PlanContext): Promise<PlanOutcome> {
     return { status: "failed", plan: null, markdown: null, model, warning: message };
   }
 }
+
+/* --------------------------------------------------------------- Revision */
+
+function buildRevisionSystemPrompt(): string {
+  return [
+    "You are a senior management consultant revising an EXISTING professional document plan based on the user's feedback. You do NOT write the document — you return the improved plan.",
+    "",
+    "Rules:",
+    "- Apply the user's feedback faithfully. Otherwise preserve the coherent professional structure and ordering.",
+    "- Preserve confirmed facts and every supplied number/currency/unit EXACTLY. Never invent facts.",
+    "- Do not delete source-backed sections unless the feedback explicitly asks to. Avoid duplicate sections. Keep source and figure allocation coherent, and keep identifying missing information.",
+    "- Output a single, strictly valid JSON object ONLY — no markdown, no code fences, no comments, no trailing commas. The first character MUST be `{` and the last `}`. Use straight double quotes.",
+    "",
+    REPAIR_SCHEMA_SUMMARY,
+    "Return the FULL revised plan (all sections), not a diff.",
+  ].join("\n");
+}
+
+function buildRevisionUserPrompt(
+  ctx: PlanContext,
+  feedback: string,
+  currentPlan: DocumentPlan
+): string {
+  const { project, document, knowledgeItems, resources } = ctx;
+  const sources = sourceBlock(resources);
+  return [
+    `DOCUMENT: ${document.title} (type: ${document.type})`,
+    `PROJECT: ${project.name} — ${project.description || "no description"}`,
+    "",
+    "==== USER FEEDBACK — APPLY THIS TO IMPROVE THE PLAN ====",
+    feedback,
+    "",
+    "==== CURRENT PLAN (JSON) TO REVISE ====",
+    clamp(JSON.stringify(currentPlan), 7000),
+    "",
+    "PROJECT KNOWLEDGE:",
+    knowledgeBlock(knowledgeItems),
+    "",
+    "SOURCE BRIEFS:",
+    sources.text,
+    "",
+    "Now output the FULL revised plan as a single JSON object using the same schema.",
+  ].join("\n");
+}
+
+export async function reviseDocumentPlan(
+  ctx: PlanContext,
+  feedback: string,
+  currentPlan: DocumentPlan
+): Promise<PlanOutcome> {
+  const fallback = {
+    documentTitle: ctx.document.title,
+    documentType: ctx.document.type,
+  };
+
+  if (!hasOpenAIKey()) {
+    return {
+      status: "failed",
+      plan: null,
+      markdown: null,
+      model: null,
+      warning: "The plan could not be revised. Check OpenAI configuration.",
+    };
+  }
+
+  const sources = sourceBlock(ctx.resources);
+  const model = getPlannerModel();
+
+  try {
+    const result = await generateTextWithOpenAI(
+      buildRevisionUserPrompt(ctx, feedback, currentPlan),
+      {
+        instructions: buildRevisionSystemPrompt(),
+        model,
+        maxOutputTokens: 8000,
+        jsonObject: true,
+      }
+    );
+
+    let parsed = extractJsonObject(result.text);
+    let repaired = false;
+
+    if (!parsed) {
+      logParseFailure(result.model, result.text, "revision extraction returned null");
+      parsed = await repairPlanJson(result.text, model);
+      repaired = Boolean(parsed);
+
+      if (!parsed) {
+        return {
+          status: "failed",
+          plan: null,
+          markdown: null,
+          model: result.model,
+          warning:
+            "The revised plan could not be parsed. Try a shorter or clearer instruction.",
+          rawPreview: result.text.slice(0, 1000),
+        };
+      }
+    }
+
+    const plan = sanitizeDocumentPlan(parsed, fallback);
+    const { status, warnings } = assessPlan(plan, {
+      isLargeDocument: true,
+      hasResources: sources.hasResources,
+      hasWeakSources: sources.hasWeakSources,
+    });
+    const allWarnings = repaired
+      ? ["Plan was repaired after malformed model output.", ...warnings]
+      : warnings;
+    if (allWarnings.length) {
+      plan.sourceCoverage.warnings = [
+        ...plan.sourceCoverage.warnings,
+        ...allWarnings,
+      ].slice(0, 10);
+    }
+
+    return {
+      status,
+      plan,
+      markdown: documentPlanToMarkdown(plan),
+      model: result.model,
+      warning: repaired
+        ? "Plan was repaired after malformed model output."
+        : undefined,
+    };
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "The plan could not be revised.";
+    return { status: "failed", plan: null, markdown: null, model, warning: message };
+  }
+}

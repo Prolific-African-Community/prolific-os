@@ -52,7 +52,10 @@ export async function listSectionDTOs(documentId: string): Promise<SectionDTO[]>
 
 export async function syncSectionsFromPlan(
   document: Document
-): Promise<{ sections: SectionDTO[]; created: number; updated: number } | { error: string }> {
+): Promise<
+  | { sections: SectionDTO[]; created: number; updated: number; appliedAt: string }
+  | { error: string }
+> {
   const rawPlan = (document as { documentPlan?: unknown }).documentPlan;
   if (!rawPlan) {
     return { error: "No document plan available. Generate a plan first." };
@@ -124,8 +127,15 @@ export async function syncSectionsFromPlan(
     }
   }
 
+  // Stamp when the plan was applied to sections, for out-of-sync detection.
+  const appliedAt = new Date();
+  await prisma.document.update({
+    where: { id: document.id },
+    data: { documentPlanAppliedAt: appliedAt },
+  });
+
   const sections = await listSectionDTOs(document.id);
-  return { sections, created, updated };
+  return { sections, created, updated, appliedAt: appliedAt.toISOString() };
 }
 
 /* ----------------------------------------------------- Section generation */

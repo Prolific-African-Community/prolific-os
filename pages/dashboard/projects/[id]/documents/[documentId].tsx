@@ -19,11 +19,13 @@ import {
   cn,
 } from "../../../../../components/ui";
 import {
-  DOCUMENT_PLAN_STATUS_UI,
   DocumentPlan,
   DocumentPlanStatus,
-  planKeyFigureCount,
+  PlanSection,
+  emptyPlanSection,
+  isPlanOutOfSync,
 } from "../../../../../lib/documents/document-plan";
+import { PlanBlueprint } from "../../../../../components/product/plan-blueprint";
 import {
   SECTION_STATUS_UI,
   SectionDTO,
@@ -64,6 +66,7 @@ interface DocumentDetail {
   documentPlan?: DocumentPlan | null;
   documentPlanStatus?: DocumentPlanStatus | null;
   documentPlanUpdatedAt?: string | null;
+  documentPlanAppliedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -120,6 +123,9 @@ const initialForm = (): DocumentDetailForm => ({
   templateId: "",
 });
 
+const deepClone = <T,>(value: T): T =>
+  JSON.parse(JSON.stringify(value)) as T;
+
 export default function DocumentDetailPage() {
   const router = useRouter();
   const projectId =
@@ -141,11 +147,17 @@ export default function DocumentDetailPage() {
   const [creatingRun, setCreatingRun] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [plan, setPlan] = useState<DocumentPlan | null>(null);
+  const [planDraft, setPlanDraft] = useState<DocumentPlan | null>(null);
   const [planStatus, setPlanStatus] = useState<DocumentPlanStatus | null>(null);
   const [planUpdatedAt, setPlanUpdatedAt] = useState<string | null>(null);
+  const [planAppliedAt, setPlanAppliedAt] = useState<string | null>(null);
+  const [planDirty, setPlanDirty] = useState(false);
+  const [planFeedback, setPlanFeedback] = useState("");
   const [planning, setPlanning] = useState(false);
+  const [revising, setRevising] = useState(false);
+  const [savingPlan, setSavingPlan] = useState(false);
   const [planError, setPlanError] = useState<string | null>(null);
-  const [showPlan, setShowPlan] = useState(false);
+  const [planNote, setPlanNote] = useState<string | null>(null);
   const [sections, setSections] = useState<SectionDTO[]>([]);
   const [sectionsLoading, setSectionsLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
@@ -255,8 +267,11 @@ export default function DocumentDetailPage() {
       );
       setDocument(data);
       setPlan(data.documentPlan ?? null);
+      setPlanDraft(data.documentPlan ? deepClone(data.documentPlan) : null);
+      setPlanDirty(false);
       setPlanStatus(data.documentPlanStatus ?? null);
       setPlanUpdatedAt(data.documentPlanUpdatedAt ?? null);
+      setPlanAppliedAt(data.documentPlanAppliedAt ?? null);
       setForm({
         title: data.title,
         type: data.type,
@@ -354,29 +369,43 @@ export default function DocumentDetailPage() {
     }
   };
 
+  interface PlanResp {
+    documentPlan: DocumentPlan | null;
+    documentPlanStatus: DocumentPlanStatus;
+    documentPlanUpdatedAt: string | null;
+    documentPlanAppliedAt?: string | null;
+    warning?: string | null;
+  }
+
+  const planBase = () =>
+    `/api/projects/${projectId}/documents/${documentId}/plan`;
+
+  const applyPlanResponse = (res: PlanResp) => {
+    setPlan(res.documentPlan);
+    setPlanDraft(res.documentPlan ? deepClone(res.documentPlan) : null);
+    setPlanDirty(false);
+    setPlanStatus(res.documentPlanStatus);
+    setPlanUpdatedAt(res.documentPlanUpdatedAt);
+    if (res.documentPlanAppliedAt !== undefined) {
+      setPlanAppliedAt(res.documentPlanAppliedAt ?? null);
+    }
+  };
+
   const handleGeneratePlan = async () => {
     if (!projectId || !documentId) return;
     setPlanning(true);
     setPlanError(null);
+    setPlanNote(null);
     try {
-      const res = await request<{
-        documentPlan: DocumentPlan | null;
-        documentPlanStatus: DocumentPlanStatus;
-        documentPlanUpdatedAt: string | null;
-        warning?: string | null;
-      }>(`/api/projects/${projectId}/documents/${documentId}/plan`, {
-        method: "POST",
-      });
-      setPlan(res.documentPlan);
-      setPlanStatus(res.documentPlanStatus);
-      setPlanUpdatedAt(res.documentPlanUpdatedAt);
+      const res = await request<PlanResp>(planBase(), { method: "POST" });
+      applyPlanResponse(res);
       if (res.documentPlanStatus === "failed") {
         setPlanError(
           res.warning ||
             "Document plan could not be generated. Check OpenAI configuration."
         );
-      } else if (res.documentPlan) {
-        setShowPlan(true);
+      } else if (res.warning) {
+        setPlanNote(res.warning);
       }
     } catch (planErr) {
       setPlanError(
@@ -388,6 +417,82 @@ export default function DocumentDetailPage() {
       setPlanning(false);
     }
   };
+
+  const handleRevisePlan = async () => {
+    if (!projectId || !documentId || !planFeedback.trim()) return;
+    setRevising(true);
+    setPlanError(null);
+    setPlanNote(null);
+    try {
+      const res = await request<PlanResp>(`${planBase()}/revise`, {
+        method: "POST",
+        body: JSON.stringify({ feedback: planFeedback }),
+      });
+      if (!res.documentPlan || res.documentPlanStatus === "failed") {
+        setPlanError(res.warning || "The plan could not be revised.");
+      } else {
+        applyPlanResponse(res);
+        setPlanFeedback("");
+        setPlanNote(res.warning || "Plan improved.");
+      }
+    } catch (reviseErr) {
+      setPlanError(
+        reviseErr instanceof Error
+          ? reviseErr.message
+          : "Unable to revise the plan"
+      );
+    } finally {
+      setRevising(false);
+    }
+  };
+
+  const handleSavePlan = async () => {
+    if (!projectId || !documentId || !planDraft) return;
+    setSavingPlan(true);
+    setPlanError(null);
+    setPlanNote(null);
+    try {
+      const res = await request<PlanResp>(planBase(), {
+        method: "PATCH",
+        body: JSON.stringify({ documentPlan: planDraft }),
+      });
+      applyPlanResponse(res);
+      setPlanNote("Plan saved. Existing sections were not changed.");
+    } catch (saveErr) {
+      setPlanError(
+        saveErr instanceof Error ? saveErr.message : "Unable to save the plan"
+      );
+    } finally {
+      setSavingPlan(false);
+    }
+  };
+
+  const mutateDraft = (fn: (sections: PlanSection[]) => PlanSection[]) => {
+    setPlanDraft((cur) =>
+      cur ? { ...cur, sections: fn(cur.sections.map((s) => ({ ...s }))) } : cur
+    );
+    setPlanDirty(true);
+  };
+
+  const handlePlanSectionChange = (index: number, patch: Partial<PlanSection>) =>
+    mutateDraft((secs) =>
+      secs.map((s, i) => (i === index ? { ...s, ...patch } : s))
+    );
+
+  const handlePlanSectionMove = (index: number, dir: -1 | 1) =>
+    mutateDraft((secs) => {
+      const j = index + dir;
+      if (j < 0 || j >= secs.length) return secs;
+      const copy = [...secs];
+      [copy[index], copy[j]] = [copy[j], copy[index]];
+      return copy;
+    });
+
+  const handlePlanSectionRemove = (index: number) =>
+    mutateDraft((secs) => secs.filter((_, i) => i !== index));
+
+  const handlePlanSectionAdd = () =>
+    mutateDraft((secs) => [...secs, emptyPlanSection(secs.length)]);
 
   const sectionsBase = () =>
     `/api/projects/${projectId}/documents/${documentId}/sections`;
@@ -409,11 +514,12 @@ export default function DocumentDetailPage() {
     setSectionsError(null);
     setSectionsNote(null);
     try {
-      const { data, message } = await requestFull<SectionDTO[]>(
-        `${sectionsBase()}/sync-from-plan`,
-        { method: "POST" }
-      );
-      setSections(data);
+      const { data, message } = await requestFull<{
+        sections: SectionDTO[];
+        appliedAt: string;
+      }>(`${sectionsBase()}/sync-from-plan`, { method: "POST" });
+      setSections(data.sections);
+      setPlanAppliedAt(data.appliedAt);
       setSectionsNote(message ?? "Sections synced from plan.");
     } catch (err) {
       setSectionsError(
@@ -676,6 +782,35 @@ export default function DocumentDetailPage() {
           <div className="grid gap-6 lg:grid-cols-[1.65fr_1fr]">
             {/* Main: editor + setup */}
             <div className="space-y-6">
+              <PlanBlueprint
+                plan={planDraft}
+                status={planStatus}
+                updatedAt={planUpdatedAt}
+                outOfSync={isPlanOutOfSync({
+                  sectionsExist: sections.length > 0,
+                  planUpdatedAt,
+                  planAppliedAt,
+                })}
+                sectionsExist={sections.length > 0}
+                dirty={planDirty}
+                generating={planning}
+                revising={revising}
+                saving={savingPlan}
+                applying={syncing}
+                feedback={planFeedback}
+                error={planError}
+                note={planNote}
+                onFeedbackChange={setPlanFeedback}
+                onGenerate={handleGeneratePlan}
+                onRevise={handleRevisePlan}
+                onSave={handleSavePlan}
+                onApply={handleSyncSections}
+                onSectionChange={handlePlanSectionChange}
+                onSectionMove={handlePlanSectionMove}
+                onSectionRemove={handlePlanSectionRemove}
+                onSectionAdd={handlePlanSectionAdd}
+              />
+
               <Card className="overflow-hidden">
                 <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-3.5">
                   <div className="inline-flex rounded-xl border border-line bg-canvas p-1">
@@ -1065,156 +1200,6 @@ export default function DocumentDetailPage() {
 
             {/* Side panel */}
             <div className="space-y-6 lg:sticky lg:top-6 lg:self-start">
-              {/* Document plan */}
-              <Card className="p-6">
-                <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-accent-600">
-                  <Icon name="layers" size={14} />
-                  Document plan
-                </div>
-                <p className="mt-2 text-sm leading-6 text-ink-muted">
-                  Plan the sections and source allocation before writing — it
-                  makes the document more controlled and specific.
-                </p>
-
-                {(() => {
-                  const status: DocumentPlanStatus = planStatus ?? "pending";
-                  const ui = DOCUMENT_PLAN_STATUS_UI[status];
-                  return (
-                    <div className="mt-4 flex flex-wrap items-center gap-2">
-                      <Badge
-                        tone={ui.tone}
-                        icon={
-                          status === "ready"
-                            ? "check"
-                            : status === "failed"
-                            ? "alert"
-                            : undefined
-                        }
-                      >
-                        {ui.label}
-                      </Badge>
-                      {plan ? (
-                        <>
-                          <Badge tone="neutral" icon="documents">
-                            {plan.sections.length} sections
-                          </Badge>
-                          {planKeyFigureCount(plan) > 0 && (
-                            <Badge tone="neutral" icon="bolt">
-                              {planKeyFigureCount(plan)} figures
-                            </Badge>
-                          )}
-                        </>
-                      ) : null}
-                    </div>
-                  );
-                })()}
-
-                {planError && (
-                  <Alert tone="danger" className="mt-4">
-                    {planError}
-                  </Alert>
-                )}
-
-                {plan && (
-                  <div className="mt-4 space-y-3">
-                    {plan.executiveIntent && (
-                      <p className="text-sm leading-6 text-ink-soft">
-                        {plan.executiveIntent.length > 220
-                          ? `${plan.executiveIntent.slice(0, 220)}…`
-                          : plan.executiveIntent}
-                      </p>
-                    )}
-
-                    <div className="grid grid-cols-2 gap-2">
-                      <div className="rounded-lg bg-ink/[0.03] px-3 py-2">
-                        <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-muted">
-                          Sources used
-                        </p>
-                        <p className="text-sm font-semibold text-ink">
-                          {plan.sourceCoverage.resourcesUsed.length}
-                        </p>
-                      </div>
-                      <div className="rounded-lg bg-ink/[0.03] px-3 py-2">
-                        <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-muted">
-                          Missing info
-                        </p>
-                        <p className="text-sm font-semibold text-ink">
-                          {plan.missingInformation.length}
-                        </p>
-                      </div>
-                    </div>
-
-                    {plan.sourceCoverage.warnings.length > 0 && (
-                      <div className="rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-2.5">
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-amber-700">
-                          Coverage warnings
-                        </p>
-                        <ul className="mt-1 space-y-0.5">
-                          {plan.sourceCoverage.warnings.slice(0, 3).map((w, i) => (
-                            <li key={i} className="text-xs leading-5 text-amber-700">
-                              • {w}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-
-                    <button
-                      type="button"
-                      onClick={() => setShowPlan((v) => !v)}
-                      className="inline-flex items-center gap-1.5 text-xs font-semibold text-ink-muted transition-colors hover:text-ink"
-                    >
-                      <Icon
-                        name={showPlan ? "chevron-down" : "chevron-right"}
-                        size={14}
-                      />
-                      {showPlan ? "Hide" : "Show"} planned sections
-                    </button>
-
-                    {showPlan && (
-                      <ol className="space-y-1.5 rounded-xl bg-ink/[0.02] p-3">
-                        {plan.sections.map((s, i) => (
-                          <li key={s.id} className="text-xs leading-5">
-                            <span className="font-semibold text-ink">
-                              {i + 1}. {s.title}
-                            </span>
-                            {s.keyFigures.length > 0 && (
-                              <span className="text-ink-muted">
-                                {" "}
-                                · {s.keyFigures.length} figure
-                                {s.keyFigures.length > 1 ? "s" : ""}
-                              </span>
-                            )}
-                          </li>
-                        ))}
-                      </ol>
-                    )}
-                  </div>
-                )}
-
-                <div className="mt-5">
-                  <Button
-                    type="button"
-                    variant={plan ? "ghost" : "primary"}
-                    onClick={handleGeneratePlan}
-                    loading={planning}
-                    icon="layers"
-                    className="w-full"
-                  >
-                    {planning
-                      ? "Planning…"
-                      : plan
-                      ? "Refresh plan"
-                      : "Generate document plan"}
-                  </Button>
-                  {planUpdatedAt && (
-                    <p className="mt-2 text-xs text-ink-faint">
-                      Updated {formatDate(planUpdatedAt)}
-                    </p>
-                  )}
-                </div>
-              </Card>
-
               {/* Generate */}
               <Card className="p-6">
                 <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-accent-600">
