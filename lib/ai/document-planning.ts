@@ -10,6 +10,7 @@ import {
   getPlannerModel,
   hasOpenAIKey,
 } from "./openai";
+import { extractJsonObject } from "./json-extract";
 import { getTypePlaybook } from "./document-standards";
 import { decodeExtraction } from "../resources/extraction-meta";
 import { SourceBrief } from "../resources/source-brief";
@@ -34,6 +35,8 @@ export interface PlanOutcome {
   markdown: string | null;
   model: string | null;
   warning?: string;
+  /** Truncated raw model output — surfaced by the endpoint in development only. */
+  rawPreview?: string;
 }
 
 const clamp = (v: string | null | undefined, n: number) =>
@@ -51,7 +54,7 @@ function buildSystemPrompt(): string {
     "You produce a structured, section-by-section plan that maps what each section must contain, which sources feed it, which exact figures it must include, and what remains uncertain.",
     "",
     "Hard rules:",
-    "- Output a single JSON object ONLY. No prose, no Markdown, no code fences.",
+    "- Output a single, strictly valid JSON object ONLY. No prose, no Markdown, no code fences, no comments, no trailing commas. The first character MUST be `{` and the last character MUST be `}`. Use straight double quotes for all keys and string values.",
     "- Use project knowledge and resource SOURCE BRIEFS as the primary evidence. Use raw excerpts only to confirm specifics.",
     "- Never invent facts, figures, names or dates. Preserve every supplied number/currency/unit EXACTLY. Attribute each figure to its source.",
     "- Assign concrete sources (by filename) and specific key figures to the sections that should use them.",
@@ -167,17 +170,50 @@ function buildUserPrompt(ctx: PlanContext): string {
   ].join("\n");
 }
 
-/* ------------------------------------------------------- JSON extraction */
+/* --------------------------------------------------------------- Repair */
 
-function extractJsonObject(raw: string): unknown | null {
-  let text = raw.trim();
-  text = text.replace(/^```(?:json)?/i, "").replace(/```$/i, "").trim();
-  const first = text.indexOf("{");
-  const last = text.lastIndexOf("}");
-  if (first === -1 || last === -1 || last <= first) return null;
+function logParseFailure(model: string, raw: string, error: string) {
+  // Safe debug info only — never secrets or full source documents.
+  console.error("[document-plan] parse failed", {
+    model,
+    outputLength: raw.length,
+    preview: raw.slice(0, 1000),
+    error,
+  });
+}
+
+const REPAIR_SCHEMA_SUMMARY =
+  "Schema keys: documentTitle, documentType, language('fr'|'en'|'unknown'), targetLength{minWords,idealWords,maxWords?}, format{pageFormat,orientation,outputMode}, executiveIntent, sourceCoverage{resourcesUsed[],resourcesNotUsed[{resourceTitle,reason}],confidence,warnings[]}, sections[{id,title,level(2|3),purpose,targetWords?,sourceBriefs[],keyFacts[],keyFigures[{label,value,source?}],tables[{title,purpose,columns[]}],visualIdeas[{type,description}],risks[],assumptions[],openQuestions[],acceptanceCriteria[]}], annexes[{title,source?,purpose}], missingInformation[], qualityChecklist[], generationStrategy.";
+
+/** One cheap repair pass: ask the model to convert bad output into strict JSON. */
+async function repairPlanJson(
+  rawText: string,
+  model: string
+): Promise<Record<string, unknown> | null> {
+  const repairPrompt = [
+    "The text below was meant to be a JSON document plan but is malformed. Convert it into a SINGLE valid JSON object.",
+    "Return JSON ONLY — no markdown, no code fences, no comments, no trailing commas. The first character must be { and the last must be }.",
+    REPAIR_SCHEMA_SUMMARY,
+    "",
+    "MALFORMED OUTPUT:",
+    rawText.slice(0, 8000),
+  ].join("\n");
+
   try {
-    return JSON.parse(text.slice(first, last + 1));
-  } catch {
+    const result = await generateTextWithOpenAI(repairPrompt, {
+      instructions:
+        "You convert malformed text into strict, valid JSON. Output JSON only.",
+      model,
+      maxOutputTokens: 8000,
+      jsonObject: true,
+    });
+    return extractJsonObject(result.text);
+  } catch (error) {
+    logParseFailure(
+      model,
+      "",
+      `repair call failed: ${error instanceof Error ? error.message : String(error)}`
+    );
     return null;
   }
 }
@@ -207,18 +243,31 @@ export async function planDocument(ctx: PlanContext): Promise<PlanOutcome> {
     const result = await generateTextWithOpenAI(buildUserPrompt(ctx), {
       instructions: buildSystemPrompt(),
       model,
-      maxOutputTokens: 3600,
+      // A full plan (20+ sections with source/figure allocation) is large JSON;
+      // too low a ceiling truncates it mid-object and breaks parsing.
+      maxOutputTokens: 8000,
+      jsonObject: true,
     });
 
-    const parsed = extractJsonObject(result.text);
+    let parsed = extractJsonObject(result.text);
+    let repaired = false;
+
     if (!parsed) {
-      return {
-        status: "failed",
-        plan: null,
-        markdown: null,
-        model: result.model,
-        warning: "Document plan could not be parsed. Please try again.",
-      };
+      logParseFailure(result.model, result.text, "extraction returned null");
+      parsed = await repairPlanJson(result.text, model);
+      repaired = Boolean(parsed);
+
+      if (!parsed) {
+        return {
+          status: "failed",
+          plan: null,
+          markdown: null,
+          model: result.model,
+          warning:
+            "The planner returned malformed JSON that could not be repaired. Retry, or reduce the context size.",
+          rawPreview: result.text.slice(0, 1000),
+        };
+      }
     }
 
     const plan = sanitizeDocumentPlan(parsed, fallback);
@@ -227,10 +276,13 @@ export async function planDocument(ctx: PlanContext): Promise<PlanOutcome> {
       hasResources: sources.hasResources,
       hasWeakSources: sources.hasWeakSources,
     });
-    if (warnings.length) {
+    const allWarnings = repaired
+      ? ["Plan was repaired after malformed model output.", ...warnings]
+      : warnings;
+    if (allWarnings.length) {
       plan.sourceCoverage.warnings = [
         ...plan.sourceCoverage.warnings,
-        ...warnings,
+        ...allWarnings,
       ].slice(0, 10);
     }
 
@@ -239,6 +291,9 @@ export async function planDocument(ctx: PlanContext): Promise<PlanOutcome> {
       plan,
       markdown: documentPlanToMarkdown(plan),
       model: result.model,
+      warning: repaired
+        ? "Plan was repaired after malformed model output."
+        : undefined,
     };
   } catch (error) {
     const message =

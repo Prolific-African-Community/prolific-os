@@ -20,6 +20,11 @@ export function getPlannerModel() {
   return process.env.OPENAI_MODEL_PLANNER || getOpenAIModel();
 }
 
+/** Model used for per-section generation. Falls back to the main model, then default. */
+export function getSectionModel() {
+  return process.env.OPENAI_MODEL_SECTION || getOpenAIModel();
+}
+
 export function hasOpenAIKey() {
   return Boolean(process.env.OPENAI_API_KEY);
 }
@@ -87,6 +92,8 @@ export interface GenerateTextOptions {
   maxOutputTokens?: number;
   /** Override the model (e.g. a cheaper model for distillation). */
   model?: string;
+  /** Ask the model for a strict JSON object (Responses API json_object mode). */
+  jsonObject?: boolean;
 }
 
 export async function generateTextWithOpenAI(
@@ -97,13 +104,35 @@ export async function generateTextWithOpenAI(
 
   try {
     const client = getOpenAIClient();
-    const response = await client.responses.create({
-      model,
-      input: prompt,
-      ...(options.instructions ? { instructions: options.instructions } : {}),
-      // Allow room for a 4,000–5,000 word deliverable (~1.3 tokens/word) plus headroom.
-      max_output_tokens: options.maxOutputTokens ?? 12000,
-    });
+
+    const create = (useJson: boolean) =>
+      client.responses.create({
+        model,
+        input: prompt,
+        ...(options.instructions ? { instructions: options.instructions } : {}),
+        ...(useJson
+          ? { text: { format: { type: "json_object" } as const } }
+          : {}),
+        // Allow room for a 4,000–5,000 word deliverable plus headroom.
+        max_output_tokens: options.maxOutputTokens ?? 12000,
+      });
+
+    let response;
+    try {
+      response = await create(Boolean(options.jsonObject));
+    } catch (err) {
+      // Some models/endpoints reject json_object mode with a 400; retry plain.
+      if (
+        options.jsonObject &&
+        err instanceof OpenAI.APIError &&
+        err.status === 400
+      ) {
+        response = await create(false);
+      } else {
+        throw err;
+      }
+    }
+
     const text = response.output_text?.trim();
 
     if (!text) {

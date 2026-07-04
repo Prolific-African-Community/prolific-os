@@ -94,6 +94,10 @@ export default withAuth(
             ? updated.documentPlanUpdatedAt.toISOString()
             : null,
           warning: outcome.warning ?? null,
+          rawPreview:
+            process.env.NODE_ENV !== "production"
+              ? outcome.rawPreview ?? null
+              : undefined,
         },
       });
     } catch (error) {
