@@ -3,6 +3,7 @@ import {
   getDistillationModel,
   hasOpenAIKey,
 } from "./openai";
+import { extractJsonObject } from "./json-extract";
 import {
   SourceBrief,
   SourceBriefStatus,
@@ -28,6 +29,8 @@ export interface DistillOutcome {
   markdown: string | null;
   model: string | null;
   warning?: string;
+  /** Truncated raw model output — surfaced by the endpoint in development only. */
+  rawPreview?: string;
 }
 
 /* --------------------------------------------------------------- Prompts */
@@ -39,7 +42,7 @@ function buildSystemPrompt(): string {
     "Your job is to EXTRACT and STRUCTURE what is actually in the source — not to rewrite it, summarize the world, or add generic business filler.",
     "",
     "Hard rules:",
-    "- Output a single JSON object ONLY. No prose, no Markdown, no code fences.",
+    "- Output a single, strictly valid JSON object ONLY. No prose, no Markdown, no code fences, no comments, no trailing commas. The first character MUST be `{` and the last character MUST be `}`. Use straight double quotes.",
     "- Never invent facts, figures, names, dates or clauses that are not present in the source. If something is implied but not stated, put it under `assumptions` (not `keyFacts`).",
     "- Preserve every number, currency, unit, name and proper noun EXACTLY as written in the source.",
     "- Do not draw legal conclusions or overstate confidence. Use `low`/`medium`/`high` honestly.",
@@ -109,18 +112,50 @@ function buildUserPrompt(input: DistillInput, text: string): string {
   ].join("\n");
 }
 
-/* ------------------------------------------------------- JSON extraction */
+/* --------------------------------------------------------------- Repair */
 
-function extractJsonObject(raw: string): unknown | null {
-  let text = raw.trim();
-  // Strip Markdown code fences if the model added them.
-  text = text.replace(/^```(?:json)?/i, "").replace(/```$/i, "").trim();
-  const first = text.indexOf("{");
-  const last = text.lastIndexOf("}");
-  if (first === -1 || last === -1 || last <= first) return null;
+function logParseFailure(model: string, raw: string, error: string) {
+  // Safe debug info only — never secrets or full source documents.
+  console.error("[source-brief] parse failed", {
+    model,
+    outputLength: raw.length,
+    preview: raw.slice(0, 1000),
+    error,
+  });
+}
+
+const REPAIR_SCHEMA_SUMMARY =
+  "Schema keys: resourceTitle, language('fr'|'en'|'unknown'), summary, keyFacts[], keyFigures[{label,value,context?,confidence?}], entities[{name,type,role?}], dates[{date,context}], risks[], assumptions[], constraints[], opportunities[], decisionsNeeded[], openQuestions[], documentUses[{documentType,relevance}], usefulForSections[], confidence('high'|'medium'|'low'), warnings[].";
+
+/** One cheap repair pass: convert malformed output into strict JSON. */
+async function repairBriefJson(
+  rawText: string,
+  model: string
+): Promise<Record<string, unknown> | null> {
+  const repairPrompt = [
+    "The text below was meant to be a JSON source brief but is malformed. Convert it into a SINGLE valid JSON object.",
+    "Return JSON ONLY — no markdown, no code fences, no comments, no trailing commas. The first character must be { and the last must be }.",
+    REPAIR_SCHEMA_SUMMARY,
+    "",
+    "MALFORMED OUTPUT:",
+    rawText.slice(0, 6000),
+  ].join("\n");
+
   try {
-    return JSON.parse(text.slice(first, last + 1));
-  } catch {
+    const result = await generateTextWithOpenAI(repairPrompt, {
+      instructions:
+        "You convert malformed text into strict, valid JSON. Output JSON only.",
+      model,
+      maxOutputTokens: 5000,
+      jsonObject: true,
+    });
+    return extractJsonObject(result.text);
+  } catch (error) {
+    logParseFailure(
+      model,
+      "",
+      `repair call failed: ${error instanceof Error ? error.message : String(error)}`
+    );
     return null;
   }
 }
@@ -202,28 +237,47 @@ export async function distillResource(
     const result = await generateTextWithOpenAI(buildUserPrompt(input, clamped), {
       instructions: buildSystemPrompt(),
       model,
-      maxOutputTokens: 2400,
+      // Large PDF/XLSX summaries produce sizeable JSON; too low a ceiling
+      // truncates the object mid-stream and breaks parsing.
+      maxOutputTokens: 5000,
+      jsonObject: true,
     });
 
-    const parsed = extractJsonObject(result.text);
+    let parsed = extractJsonObject(result.text);
+    let repaired = false;
+
     if (!parsed) {
-      return {
-        status: "failed",
-        brief: minimalBrief(fallback, {
-          warnings: ["The source brief output could not be parsed."],
-        }),
-        markdown: null,
-        model: result.model,
-        warning: "Source brief could not be generated. Please try again.",
-      };
+      logParseFailure(result.model, result.text, "extraction returned null");
+      parsed = await repairBriefJson(result.text, model);
+      repaired = Boolean(parsed);
+
+      if (!parsed) {
+        return {
+          status: "failed",
+          brief: minimalBrief(fallback, {
+            warnings: ["The source brief output could not be parsed."],
+          }),
+          markdown: null,
+          model: result.model,
+          warning:
+            "The model returned malformed JSON that could not be repaired. Try refreshing the source brief.",
+          rawPreview: result.text.slice(0, 1000),
+        };
+      }
     }
 
     const brief = sanitizeSourceBrief(parsed, fallback);
+    const extraWarnings: string[] = [];
+    if (repaired) {
+      extraWarnings.push("Source brief was repaired after malformed model output.");
+    }
     if (truncated) {
-      brief.warnings = [
-        "Source was truncated for analysis; some later content may be missing.",
-        ...brief.warnings,
-      ].slice(0, 6);
+      extraWarnings.push(
+        "Source was truncated for analysis; some later content may be missing."
+      );
+    }
+    if (extraWarnings.length) {
+      brief.warnings = [...extraWarnings, ...brief.warnings].slice(0, 6);
     }
 
     const status: SourceBriefStatus = brief.summary ? "ready" : "partial";
@@ -232,6 +286,9 @@ export async function distillResource(
       brief,
       markdown: sourceBriefToMarkdown(brief),
       model: result.model,
+      warning: repaired
+        ? "Source brief was repaired after malformed model output."
+        : undefined,
     };
   } catch (error) {
     const message =

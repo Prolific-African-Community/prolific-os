@@ -82,6 +82,10 @@ export default withAuth(
         success: true,
         data: serializeResource(updated),
         message: distillation.warning || undefined,
+        rawPreview:
+          process.env.NODE_ENV !== "production"
+            ? distillation.rawPreview ?? null
+            : undefined,
       });
     } catch (error) {
       console.error("RESOURCE DISTILL ERROR:", error);
