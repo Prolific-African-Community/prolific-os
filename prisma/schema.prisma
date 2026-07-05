@@ -96,6 +96,8 @@ model Resource {
   sourceBriefModel     String?
   sourceBriefUpdatedAt DateTime?
 
+  visualPlacements DocumentVisualPlacement[]
+
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -146,6 +148,7 @@ model Document {
   resources      Resource[]
   generationRuns GenerationRun[]
   sections       DocumentSection[]
+  visualPlacements DocumentVisualPlacement[]
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
 
@@ -196,6 +199,8 @@ model DocumentSection {
   reviewedAt    DateTime?
   approvedAt    DateTime?
 
+  visualPlacements DocumentVisualPlacement[]
+
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -218,4 +223,41 @@ model GenerationRun {
 
   @@index([documentId])
   @@index([status])
+}
+
+// Visual asset placement (image resources inserted into rendered documents).
+model DocumentVisualPlacement {
+  id         String   @id @default(cuid())
+
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  resourceId String
+  resource   Resource @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+
+  sectionId  String?
+  section    DocumentSection? @relation(fields: [sectionId], references: [id], onDelete: SetNull)
+
+  target     String  @default("section")
+  role       String  @default("illustration")
+  position   String  @default("after_heading")
+  size       String  @default("medium")
+
+  caption    String?
+  altText    String?
+  confidence String?
+  reason     String?
+
+  isEnabled   Boolean @default(true)
+  isSuggested Boolean @default(true)
+  isApproved  Boolean @default(false)
+
+  orderIndex Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([documentId])
+  @@index([resourceId])
+  @@index([sectionId])
 }

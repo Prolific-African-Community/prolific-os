@@ -1,6 +1,18 @@
 import type { NextApiResponse } from "next";
 import { markdownToPdfBuffer } from "../../../../../../../lib/export/pdf";
 import {
+  buildRenderMetadata,
+  collectKeyFigures,
+  loadLogoFromResources,
+  loadPlacementVisuals,
+  parseExportQuery,
+} from "../../../../../../../lib/export/export-context";
+import { listApprovedPlacementsForExport } from "../../../../../../../lib/documents/visual-placement-service";
+import {
+  guessLanguage,
+  resolveRenderPreset,
+} from "../../../../../../../lib/export/rendering-presets";
+import {
   AuthenticatedNextApiRequest,
   withAuth,
 } from "../../../../../../../lib/auth";
@@ -72,7 +84,11 @@ export default withAuth(
         select: {
           id: true,
           title: true,
+          type: true,
+          status: true,
           content: true,
+          assembledAt: true,
+          documentPlan: true,
         },
       });
 
@@ -88,10 +104,39 @@ export default withAuth(
           .json({ success: false, message: "Document has no content to export" });
       }
 
+      const options = parseExportQuery(req.query);
+      const preset = resolveRenderPreset(options.presetId, options.orientation);
+      const language = guessLanguage(document.content);
+      const imageResources = await prisma.resource.findMany({
+        where: { projectId, mimeType: { startsWith: "image/" } },
+        select: { id: true, filename: true, mimeType: true, storageUrl: true },
+      });
+      const logo = await loadLogoFromResources(imageResources);
+      const approvedPlacements = await listApprovedPlacementsForExport(
+        documentId
+      );
+      const visuals = await loadPlacementVisuals(approvedPlacements);
+      const metadata = buildRenderMetadata({
+        documentTitle: document.title,
+        projectName: project.name,
+        documentType: document.type,
+        status: document.status,
+        date: document.assembledAt ?? new Date(),
+        options,
+        keyFigures: collectKeyFigures(document.documentPlan, preset.keyFigures.max),
+        logo,
+        visuals,
+        language,
+      });
+
       const filename = `${slugify(project.name)}_${slugify(
         document.title
       )}_${today()}.pdf`;
-      const buffer = await markdownToPdfBuffer(document.content);
+      const buffer = await markdownToPdfBuffer(document.content, {
+        presetId: options.presetId ?? undefined,
+        orientation: options.orientation ?? undefined,
+        metadata,
+      });
 
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader(

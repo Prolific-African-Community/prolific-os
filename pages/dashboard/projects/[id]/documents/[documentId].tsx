@@ -27,6 +27,7 @@ import {
 } from "../../../../../lib/documents/document-plan";
 import { PlanBlueprint } from "../../../../../components/product/plan-blueprint";
 import {
+  ProduceResult,
   REVIEW_STATUS_UI,
   SECTION_STATUS_UI,
   SectionDTO,
@@ -221,6 +222,44 @@ export default function DocumentDetailPage() {
   const [updatingSectionMetaId, setUpdatingSectionMetaId] = useState<
     string | null
   >(null);
+  const [producing, setProducing] = useState(false);
+  const [productionResult, setProductionResult] = useState<ProduceResult | null>(
+    null
+  );
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  interface PlacementDTO {
+    id: string;
+    resourceId: string;
+    filename: string;
+    mimeType: string;
+    role: string;
+    target: string;
+    sectionId: string | null;
+    sectionTitle: string | null;
+    position: string;
+    size: string;
+    caption: string | null;
+    confidence: string | null;
+    reason: string | null;
+    isEnabled: boolean;
+    isApproved: boolean;
+    isSuggested: boolean;
+    orderIndex: number;
+  }
+
+  const [placements, setPlacements] = useState<PlacementDTO[]>([]);
+  const [placementsLoading, setPlacementsLoading] = useState(true);
+  const [suggesting, setSuggesting] = useState(false);
+  const [updatingPlacementId, setUpdatingPlacementId] = useState<string | null>(
+    null
+  );
+  const [placementsError, setPlacementsError] = useState<string | null>(null);
+  const [placementsNote, setPlacementsNote] = useState<string | null>(null);
+  const [exportStyle, setExportStyle] = useState("premium_consulting");
+  const [exportOrientation, setExportOrientation] = useState<
+    "portrait" | "landscape"
+  >("portrait");
+  const [exportConfidentiality, setExportConfidentiality] = useState("none");
   const [sectionsError, setSectionsError] = useState<string | null>(null);
   const [sectionsNote, setSectionsNote] = useState<string | null>(null);
   const [exportingMarkdown, setExportingMarkdown] = useState(false);
@@ -369,6 +408,7 @@ export default function DocumentDetailPage() {
     loadDocument();
     loadRuns();
     loadSections();
+    loadPlacements();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router.isReady, projectId, documentId]);
 
@@ -562,6 +602,62 @@ export default function DocumentDetailPage() {
     }
   };
 
+  const placementsBase = () =>
+    `/api/projects/${projectId}/documents/${documentId}/visual-placements`;
+
+  const loadPlacements = async () => {
+    if (!projectId || !documentId) return;
+    try {
+      const data = await request<PlacementDTO[]>(placementsBase());
+      setPlacements(data);
+    } catch {
+      // Non-fatal: the visuals panel simply shows an empty state.
+    } finally {
+      setPlacementsLoading(false);
+    }
+  };
+
+  const handleSuggestPlacements = async () => {
+    setSuggesting(true);
+    setPlacementsError(null);
+    setPlacementsNote(null);
+    try {
+      const { data, message } = await requestFull<PlacementDTO[]>(
+        `${placementsBase()}/suggest`,
+        { method: "POST" }
+      );
+      setPlacements(data);
+      setPlacementsNote(message ?? "Placement suggestions updated.");
+    } catch (err) {
+      setPlacementsError(
+        err instanceof Error ? err.message : "Unable to suggest placements"
+      );
+    } finally {
+      setSuggesting(false);
+    }
+  };
+
+  const handlePlacementUpdate = async (
+    id: string,
+    patch: Record<string, unknown>
+  ) => {
+    setUpdatingPlacementId(id);
+    setPlacementsError(null);
+    try {
+      const updated = await request<PlacementDTO>(`${placementsBase()}/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify(patch),
+      });
+      setPlacements((cur) => cur.map((p) => (p.id === id ? updated : p)));
+    } catch (err) {
+      setPlacementsError(
+        err instanceof Error ? err.message : "Unable to update placement"
+      );
+    } finally {
+      setUpdatingPlacementId(null);
+    }
+  };
+
   const handleSyncSections = async () => {
     setSyncing(true);
     setSectionsError(null);
@@ -685,6 +781,57 @@ export default function DocumentDetailPage() {
     }
   };
 
+  const handleProduce = async (mode: "missing" | "refresh_unlocked") => {
+    if (!projectId || !documentId) return;
+    if (planDirty) {
+      setSectionsError("Save the plan before generating.");
+      return;
+    }
+    setProducing(true);
+    setSectionsError(null);
+    setSectionsNote(null);
+    setProductionResult(null);
+    try {
+      const { data } = await requestFull<{
+        result: ProduceResult;
+        sections: SectionDTO[];
+        content: string | null;
+        documentPlan: DocumentPlan | null;
+        documentPlanStatus: DocumentPlanStatus | null;
+        documentPlanUpdatedAt: string | null;
+        documentPlanAppliedAt: string | null;
+        assembledAt: string | null;
+      }>(`/api/projects/${projectId}/documents/${documentId}/produce`, {
+        method: "POST",
+        body: JSON.stringify({ mode }),
+      });
+      setSections(data.sections);
+      setPlan(data.documentPlan);
+      setPlanDraft(data.documentPlan ? deepClone(data.documentPlan) : null);
+      setPlanDirty(false);
+      setPlanStatus(data.documentPlanStatus);
+      setPlanUpdatedAt(data.documentPlanUpdatedAt);
+      setPlanAppliedAt(data.documentPlanAppliedAt);
+      setDocumentAssembledAt(data.assembledAt);
+      if (data.content != null) {
+        const content = data.content;
+        setForm((cur) => ({ ...cur, content }));
+        setDocument((cur) =>
+          cur ? { ...cur, content, status: "READY_FOR_REVIEW" } : cur
+        );
+      }
+      setProductionResult(data.result);
+      setSectionsNote(data.result.message);
+      setView("preview");
+    } catch (err) {
+      setSectionsError(
+        err instanceof Error ? err.message : "Unable to produce document"
+      );
+    } finally {
+      setProducing(false);
+    }
+  };
+
   const handleSectionMeta = async (
     id: string,
     patch: { reviewStatus?: string; isLocked?: boolean },
@@ -785,8 +932,12 @@ export default function DocumentDetailPage() {
     else setExportingPdf(true);
     setExportError(null);
     try {
+      const query =
+        format === "markdown"
+          ? ""
+          : `?preset=${exportStyle}&orientation=${exportOrientation}&confidentiality=${exportConfidentiality}`;
       const response = await fetch(
-        `/api/projects/${projectId}/documents/${documentId}/export/${format}`,
+        `/api/projects/${projectId}/documents/${documentId}/export/${format}${query}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       if (response.status === 401) {
@@ -860,8 +1011,8 @@ export default function DocumentDetailPage() {
     busy: boolean;
   }[] = [
     { format: "markdown", label: "Markdown", busy: exportingMarkdown },
-    { format: "docx", label: "Word (DOCX)", busy: exportingDocx },
-    { format: "pdf", label: "PDF", busy: exportingPdf },
+    { format: "docx", label: "Premium DOCX", busy: exportingDocx },
+    { format: "pdf", label: "Premium PDF", busy: exportingPdf },
   ];
 
   return (
@@ -1541,46 +1692,388 @@ export default function DocumentDetailPage() {
                   </>
                 )}
               </Card>
+
+              {/* Visual assets */}
+              <Card className="p-6">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-accent-600">
+                      <Icon name="image" size={14} />
+                      Visual assets
+                    </div>
+                    <p className="mt-2 max-w-md text-sm leading-6 text-ink-muted">
+                      Project images are matched to sections. Only approved
+                      visuals are included in exports; logos stay on the cover.
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    icon="sparkles"
+                    loading={suggesting}
+                    onClick={handleSuggestPlacements}
+                  >
+                    Suggest placements
+                  </Button>
+                </div>
+
+                {placementsError && (
+                  <Alert tone="danger" className="mt-4">
+                    {placementsError}
+                  </Alert>
+                )}
+                {placementsNote && !placementsError && (
+                  <Alert tone="info" className="mt-4">
+                    {placementsNote}
+                  </Alert>
+                )}
+
+                {placementsLoading ? (
+                  <div className="mt-4 space-y-2">
+                    <Skeleton className="h-16" />
+                  </div>
+                ) : !placements.length ? (
+                  <div className="mt-4 rounded-xl border border-dashed border-line bg-ink/[0.015] px-4 py-6 text-center text-sm text-ink-muted">
+                    No image resources detected yet. Upload images to the
+                    project, then click “Suggest placements”.
+                  </div>
+                ) : (
+                  <div className="mt-4 space-y-3">
+                    {placements.map((p) => {
+                      const busy = updatingPlacementId === p.id;
+                      const isLogo = p.role === "logo" || p.target === "cover";
+                      return (
+                        <div
+                          key={p.id}
+                          className={cn(
+                            "rounded-xl border p-3.5",
+                            p.isApproved && p.isEnabled
+                              ? "border-emerald-200"
+                              : "border-line",
+                            !p.isEnabled && "opacity-60"
+                          )}
+                        >
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-ink/[0.04] text-ink-soft">
+                              <Icon name="image" size={16} />
+                            </span>
+                            <span className="truncate text-sm font-semibold text-ink">
+                              {p.filename}
+                            </span>
+                            <Badge tone="neutral">{p.role.replace("_", " ")}</Badge>
+                            {p.confidence && (
+                              <Badge
+                                tone={
+                                  p.confidence === "high"
+                                    ? "success"
+                                    : p.confidence === "medium"
+                                    ? "accent"
+                                    : "neutral"
+                                }
+                              >
+                                {p.confidence}
+                              </Badge>
+                            )}
+                            {p.isApproved && p.isEnabled && (
+                              <Badge tone="success" icon="check">
+                                Approved
+                              </Badge>
+                            )}
+                            {!p.isEnabled && (
+                              <Badge tone="neutral">Disabled</Badge>
+                            )}
+                          </div>
+                          {p.reason && (
+                            <p className="mt-1.5 text-xs leading-5 text-ink-muted">
+                              {p.reason}
+                            </p>
+                          )}
+
+                          {isLogo ? (
+                            <p className="mt-2 text-xs text-ink-faint">
+                              Used automatically on the cover page.
+                            </p>
+                          ) : (
+                            <>
+                              <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                                <Select
+                                  value={
+                                    p.target === "appendix"
+                                      ? "__appendix__"
+                                      : p.sectionId || "__appendix__"
+                                  }
+                                  disabled={busy}
+                                  onChange={(e) => {
+                                    const v = e.target.value;
+                                    if (v === "__appendix__") {
+                                      handlePlacementUpdate(p.id, {
+                                        target: "appendix",
+                                        sectionId: null,
+                                        position: "appendix",
+                                      });
+                                    } else {
+                                      handlePlacementUpdate(p.id, {
+                                        target: "section",
+                                        sectionId: v,
+                                        position: "after_heading",
+                                      });
+                                    }
+                                  }}
+                                  className="py-1.5 text-xs"
+                                >
+                                  <option value="__appendix__">Appendix</option>
+                                  {sections.map((s) => (
+                                    <option key={s.id} value={s.id}>
+                                      {s.title.slice(0, 46)}
+                                    </option>
+                                  ))}
+                                </Select>
+                                <Select
+                                  value={p.size}
+                                  disabled={busy}
+                                  onChange={(e) =>
+                                    handlePlacementUpdate(p.id, {
+                                      size: e.target.value,
+                                    })
+                                  }
+                                  className="py-1.5 text-xs"
+                                >
+                                  <option value="small">Small</option>
+                                  <option value="medium">Medium</option>
+                                  <option value="large">Large</option>
+                                  <option value="full_width">Full width</option>
+                                </Select>
+                                <Input
+                                  defaultValue={p.caption || ""}
+                                  placeholder="Caption"
+                                  disabled={busy}
+                                  onBlur={(e) => {
+                                    const v = e.target.value.trim();
+                                    if (v !== (p.caption || "")) {
+                                      handlePlacementUpdate(p.id, {
+                                        caption: v || null,
+                                      });
+                                    }
+                                  }}
+                                  className="py-1.5 text-xs"
+                                />
+                              </div>
+                              <div className="mt-2.5 flex flex-wrap gap-2">
+                                {!p.isApproved ? (
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    icon="check"
+                                    loading={busy}
+                                    onClick={() =>
+                                      handlePlacementUpdate(p.id, {
+                                        isApproved: true,
+                                        isEnabled: true,
+                                      })
+                                    }
+                                  >
+                                    Approve
+                                  </Button>
+                                ) : (
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="ghost"
+                                    loading={busy}
+                                    onClick={() =>
+                                      handlePlacementUpdate(p.id, {
+                                        isApproved: false,
+                                      })
+                                    }
+                                  >
+                                    Unapprove
+                                  </Button>
+                                )}
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="ghost"
+                                  loading={busy}
+                                  onClick={() =>
+                                    handlePlacementUpdate(p.id, {
+                                      isEnabled: !p.isEnabled,
+                                    })
+                                  }
+                                >
+                                  {p.isEnabled ? "Disable" : "Enable"}
+                                </Button>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </Card>
             </div>
 
             {/* Side panel */}
             <div className="space-y-6 lg:sticky lg:top-6 lg:self-start">
-              {/* Generate */}
+              {/* Document production (primary) */}
               <Card className="p-6">
                 <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-accent-600">
-                  <Icon name="generate" size={14} />
-                  Generate with AI
+                  <Icon name="bolt" size={14} />
+                  Document production
                 </div>
                 <p className="mt-2 text-sm leading-6 text-ink-muted">
-                  We&apos;ll use this project&apos;s context to draft the
-                  document. Review before generating.
+                  One click plans, generates the sections and assembles the final
+                  document. Locked sections are always preserved.
                 </p>
+                {(() => {
+                  const withContentCount = sections.filter(
+                    (s) => s.content && s.content.trim()
+                  ).length;
+                  const stale = isDocumentStale(documentAssembledAt, sections);
+                  const hasAny = Boolean(planStatus) || sections.length > 0;
+                  const label = producing
+                    ? "Producing…"
+                    : !hasAny
+                    ? "Generate document"
+                    : sections.length > 0 && withContentCount < sections.length
+                    ? "Continue generation"
+                    : stale
+                    ? "Update final document"
+                    : "Update document";
+                  return (
+                    <>
+                      <div className="mt-4 flex flex-col gap-2">
+                        <Button
+                          type="button"
+                          icon="generate"
+                          loading={producing}
+                          disabled={planDirty}
+                          onClick={() => handleProduce("missing")}
+                          className="w-full"
+                        >
+                          {label}
+                        </Button>
+                        {planDirty && (
+                          <p className="text-xs text-amber-600">
+                            Save your plan edits before generating.
+                          </p>
+                        )}
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          icon="generate"
+                          loading={producing}
+                          disabled={planDirty || sections.length === 0}
+                          onClick={() => handleProduce("refresh_unlocked")}
+                          className="w-full"
+                        >
+                          Regenerate unlocked sections
+                        </Button>
+                      </div>
 
-                {planStatus === "ready" || planStatus === "partial" ? (
-                  <div className="mt-3 flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-2.5">
-                    <Icon
-                      name="check-circle"
-                      size={16}
-                      className="shrink-0 text-emerald-500"
-                    />
-                    <p className="text-xs leading-5 text-emerald-700">
-                      A document plan is ready — generation will follow it.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="mt-3 flex items-center gap-2 rounded-xl border border-line bg-ink/[0.02] px-3.5 py-2.5">
-                    <Icon
-                      name="info"
-                      size={16}
-                      className="shrink-0 text-ink-muted"
-                    />
-                    <p className="text-xs leading-5 text-ink-muted">
-                      Tip: generate a document plan first for a more controlled,
-                      specific result.
-                    </p>
-                  </div>
-                )}
+                      {productionResult && (
+                        <div className="mt-4 rounded-xl border border-line bg-ink/[0.02] p-3.5">
+                          <div className="flex items-center gap-2">
+                            <Badge
+                              tone={
+                                productionResult.status === "ready"
+                                  ? "success"
+                                  : productionResult.status === "partial"
+                                  ? "warning"
+                                  : "danger"
+                              }
+                            >
+                              {productionResult.status === "ready"
+                                ? "Ready"
+                                : productionResult.status === "partial"
+                                ? "Partial"
+                                : "Failed"}
+                            </Badge>
+                            {productionResult.assembly.wordCount ? (
+                              <span className="text-xs text-ink-muted">
+                                {productionResult.assembly.wordCount} words
+                              </span>
+                            ) : null}
+                          </div>
+                          <ul className="mt-2.5 space-y-1">
+                            {productionResult.steps.map((st, i) => (
+                              <li
+                                key={i}
+                                className="flex items-start gap-2 text-xs"
+                              >
+                                <Icon
+                                  name={
+                                    st.status === "done"
+                                      ? "check-circle"
+                                      : st.status === "failed"
+                                      ? "alert"
+                                      : "info"
+                                  }
+                                  size={13}
+                                  className={cn(
+                                    "mt-0.5 shrink-0",
+                                    st.status === "done"
+                                      ? "text-emerald-500"
+                                      : st.status === "failed"
+                                      ? "text-red-500"
+                                      : "text-ink-faint"
+                                  )}
+                                />
+                                <span className="text-ink-soft">
+                                  <span className="font-semibold text-ink">
+                                    {st.name}:
+                                  </span>{" "}
+                                  {st.message}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                          {productionResult.warnings.length > 0 && (
+                            <div className="mt-2.5 border-t border-line pt-2.5">
+                              {productionResult.warnings
+                                .slice(0, 4)
+                                .map((w, i) => (
+                                  <p
+                                    key={i}
+                                    className="text-xs leading-5 text-amber-700"
+                                  >
+                                    • {w}
+                                  </p>
+                                ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
+              </Card>
 
+              <button
+                type="button"
+                onClick={() => setAdvancedOpen((v) => !v)}
+                className="flex items-center gap-1.5 text-xs font-semibold text-ink-muted transition-colors hover:text-ink"
+              >
+                <Icon
+                  name={advancedOpen ? "chevron-down" : "chevron-right"}
+                  size={14}
+                />
+                Advanced: single draft
+              </button>
+
+              {advancedOpen && (
+              /* Generate — legacy single-draft (advanced) */
+              <Card className="p-6">
+                <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-muted">
+                  <Icon name="generate" size={14} />
+                  Single draft (advanced)
+                </div>
+                <p className="mt-2 text-xs leading-5 text-ink-muted">
+                  Generates the whole document in one pass, bypassing sections and
+                  locks. Less controllable — prefer Document production above.
+                </p>
                 <div className="mt-4 space-y-2">
                   {readiness.map((r) => (
                     <div
@@ -1637,11 +2130,7 @@ export default function DocumentDetailPage() {
                     icon="generate"
                     className="w-full"
                   >
-                    {generating
-                      ? "Generating…"
-                      : planStatus === "ready" || planStatus === "partial"
-                      ? "Generate from plan"
-                      : "Generate document"}
+                    {generating ? "Generating…" : "Generate single draft"}
                   </Button>
                   <Button
                     type="button"
@@ -1656,16 +2145,112 @@ export default function DocumentDetailPage() {
                   </Button>
                 </div>
               </Card>
+              )}
 
               {/* Export */}
               <Card className="p-6">
                 <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-accent-600">
                   <Icon name="export" size={14} />
-                  Export
+                  Export &amp; presentation
                 </div>
                 <p className="mt-2 text-sm leading-6 text-ink-muted">
-                  Exports use the latest saved content.
+                  Exports use the latest assembled document. The style shapes the
+                  cover, typography, tables and page layout.
                 </p>
+
+                <div className="mt-4 space-y-2.5">
+                  <label className="block">
+                    <span className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-muted">
+                      Style
+                    </span>
+                    <Select
+                      value={exportStyle}
+                      onChange={(e) => setExportStyle(e.target.value)}
+                    >
+                      <option value="premium_consulting">Premium Consulting</option>
+                      <option value="bank_financing">Bank Financing</option>
+                      <option value="formal_legal">Formal Legal</option>
+                      <option value="minimal_executive">Minimal Executive</option>
+                    </Select>
+                  </label>
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <label className="block">
+                      <span className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-muted">
+                        Format
+                      </span>
+                      <Select
+                        value={exportOrientation}
+                        onChange={(e) =>
+                          setExportOrientation(
+                            e.target.value === "landscape"
+                              ? "landscape"
+                              : "portrait"
+                          )
+                        }
+                      >
+                        <option value="portrait">A4 Portrait</option>
+                        <option value="landscape">A4 Landscape</option>
+                      </Select>
+                    </label>
+                    <label className="block">
+                      <span className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-muted">
+                        Confidentiality
+                      </span>
+                      <Select
+                        value={exportConfidentiality}
+                        onChange={(e) => setExportConfidentiality(e.target.value)}
+                      >
+                        <option value="none">None</option>
+                        <option value="internal">Internal</option>
+                        <option value="confidential">Confidential</option>
+                        <option value="draft">Draft</option>
+                        <option value="final">Final</option>
+                      </Select>
+                    </label>
+                  </div>
+                  <p className="text-xs text-ink-faint">
+                    A project image named “logo” is placed on the cover
+                    automatically.
+                    {(() => {
+                      const approved = placements.filter(
+                        (p) =>
+                          p.isApproved &&
+                          p.isEnabled &&
+                          (p.target === "section" || p.target === "appendix")
+                      ).length;
+                      return approved > 0
+                        ? ` ${approved} approved visual${
+                            approved > 1 ? "s" : ""
+                          } will be included in the export.`
+                        : " No approved section visuals.";
+                    })()}
+                  </p>
+                </div>
+
+                {isDocumentStale(documentAssembledAt, sections) && (
+                  <div className="mt-3 flex flex-col gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2.5">
+                    <div className="flex items-start gap-2">
+                      <Icon
+                        name="alert"
+                        size={15}
+                        className="mt-0.5 shrink-0 text-amber-500"
+                      />
+                      <p className="text-xs leading-5 text-amber-700">
+                        Re-assemble before exporting the latest section changes.
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      icon="check"
+                      loading={assembling}
+                      onClick={handleAssemble}
+                    >
+                      Assemble latest document
+                    </Button>
+                  </div>
+                )}
 
                 {exportError && (
                   <Alert tone="danger" className="mt-4">

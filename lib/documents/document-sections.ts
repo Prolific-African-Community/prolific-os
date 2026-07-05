@@ -195,6 +195,32 @@ export function isDocumentStale(
   );
 }
 
+/* --------------------------------------------------- Unified production */
+
+export type ProduceMode = "missing" | "refresh_unlocked" | "plan_only";
+
+export interface ProduceResult {
+  ok: boolean;
+  status: "ready" | "partial" | "failed";
+  message: string;
+  steps: Array<{
+    name: string;
+    status: "done" | "skipped" | "failed";
+    message: string;
+  }>;
+  plan: { existed: boolean; generated: boolean; updated: boolean };
+  sections: {
+    total: number;
+    created: number;
+    generated: number;
+    failed: number;
+    skippedLocked: number;
+    skippedExisting: number;
+  };
+  assembly: { assembled: boolean; assembledAt?: string; wordCount?: number };
+  warnings: string[];
+}
+
 export const REVIEW_STATUS_UI: Record<
   ReviewStatus,
   { label: string; tone: "success" | "accent" | "warning" | "danger" | "neutral" }
