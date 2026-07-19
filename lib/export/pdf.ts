@@ -1,15 +1,14 @@
 import PDFDocument from "pdfkit";
 import { CellAlign } from "../markdown/table";
+import { CompositionDocument } from "../composition";
 import {
   DocumentBlock,
   extractHeadings,
   headingHasOwnNumber,
-  normalizeHeading,
   parseInlineSegments,
-  parseMarkdownBlocks,
   plainText,
-  stripLeadingTitle,
 } from "./document-structure";
+import { composeForExport, imageNodeToRenderVisual, layoutNodeFlow, nodeToRenderBlock, resolveExportLayout } from "./composition-context";
 import {
   CalloutKind,
   DocumentRenderMetadata,
@@ -25,7 +24,6 @@ import {
   preparedByLabel,
   resolveRenderPreset,
   tocTitle,
-  visualAnnexTitle,
 } from "./rendering-presets";
 
 export interface PdfRenderOptions {
@@ -97,7 +95,12 @@ function writeTable(
   const startX = doc.page.margins.left;
   const usableWidth = contentWidth(doc);
   const colCount = header.length || 1;
-  const colWidth = usableWidth / colCount;
+  const weights = Array.from({ length: colCount }, (_, index) => {
+    const values = [header[index] || "", ...rows.map((row) => row[index] || "")];
+    return Math.min(34, Math.max(8, ...values.map((value) => plainText(value).length)));
+  });
+  const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
+  const colWidths = weights.map((weight) => (usableWidth * weight) / totalWeight);
   const padX = 6;
   const padY = preset.tables.style === "compact" ? 4 : 5;
   const fontSize = Math.max(preset.typography.bodySize - 1.5, 8);
@@ -105,8 +108,8 @@ function writeTable(
 
   const rowHeight = (cells: string[], bold: boolean) => {
     doc.font(bold ? t.fontFamilyBold : t.fontFamily).fontSize(fontSize);
-    const heights = cells.map((cell) =>
-      doc.heightOfString(plainText(cell) || " ", { width: colWidth - padX * 2 })
+    const heights = cells.map((cell, index) =>
+      doc.heightOfString(plainText(cell) || " ", { width: colWidths[index] - padX * 2 })
     );
     return Math.max(...heights, fontSize) + padY * 2;
   };
@@ -126,7 +129,8 @@ function writeTable(
       doc.rect(startX, y, usableWidth, height).fill(preset.colors.tableZebra);
     }
     cells.forEach((cell, index) => {
-      const x = startX + index * colWidth;
+      const colWidth = colWidths[index];
+      const x = startX + colWidths.slice(0, index).reduce((sum, value) => sum + value, 0);
       doc.lineWidth(0.5).strokeColor(preset.colors.tableBorder);
       doc.rect(x, y, colWidth, height).stroke();
       doc
@@ -259,20 +263,6 @@ function writeVisual(doc: Doc, preset: DocumentRenderPreset, visual: RenderVisua
 }
 
 /** Map normalized section title → visuals assigned to it. */
-function groupSectionVisuals(
-  visuals: RenderVisual[]
-): Map<string, RenderVisual[]> {
-  const map = new Map<string, RenderVisual[]>();
-  for (const visual of visuals) {
-    if (visual.target !== "section" || !visual.sectionTitle) continue;
-    const key = normalizeHeading(visual.sectionTitle);
-    const list = map.get(key) || [];
-    list.push(visual);
-    map.set(key, list);
-  }
-  return map;
-}
-
 /* ------------------------------------------------------------------ Body */
 
 function writeBlock(
@@ -421,7 +411,9 @@ function writeKeyFigureStrip(
   const t = preset.typography;
   const x = doc.page.margins.left;
   const width = contentWidth(doc);
-  const colWidth = width / figures.length;
+  const columns = Math.min(figures.length, 3);
+  const colWidth = width / columns;
+  const rowHeight = 58;
 
   doc
     .moveTo(x, y)
@@ -432,23 +424,27 @@ function writeKeyFigureStrip(
 
   const topY = y + 14;
   figures.forEach((figure, i) => {
-    const cx = x + i * colWidth;
+    const row = Math.floor(i / columns);
+    const column = i % columns;
+    const cx = x + column * colWidth;
+    const cy = topY + row * rowHeight;
     doc
       .font(t.fontFamilyBold)
       .fontSize(15)
       .fillColor(preset.colors.accent)
-      .text(figure.value, cx, topY, { width: colWidth - 10, lineBreak: false });
+      .text(figure.value, cx, cy, { width: colWidth - 14, lineBreak: false });
     doc
       .font(t.fontFamily)
       .fontSize(7.5)
       .fillColor(preset.colors.muted)
-      .text(figure.label.toUpperCase(), cx, topY + 20, {
-        width: colWidth - 10,
-        characterSpacing: 0.6,
+      .text(figure.label.toUpperCase(), cx, cy + 22, {
+        width: colWidth - 14,
+        characterSpacing: 0.35,
+        lineGap: 1,
       });
   });
 
-  return topY + 40;
+  return topY + Math.ceil(figures.length / columns) * rowHeight;
 }
 
 /* ------------------------------------------------------------- Cover page */
@@ -472,6 +468,34 @@ function drawLogo(
   }
 }
 
+function drawCoverArtwork(
+  doc: Doc,
+  preset: DocumentRenderPreset,
+  metadata: DocumentRenderMetadata
+): boolean {
+  const visual = (metadata.visuals || []).find((item) => item.target === "cover");
+  if (!visual || preset.coverPage.style === "legal") return false;
+  const x = doc.page.margins.left;
+  const width = contentWidth(doc);
+  const height = Math.min(150, doc.page.height * 0.2);
+  const y = doc.page.margins.top + 54;
+  try {
+    doc.save();
+    doc.rect(x, y, width, height).clip();
+    doc.image(visual.buffer, x, y, {
+      cover: [width, height],
+      align: "center",
+      valign: "center",
+    });
+    doc.restore();
+    doc.rect(x, y, 5, height).fill(preset.colors.accent);
+    return true;
+  } catch {
+    doc.restore();
+    return false;
+  }
+}
+
 function writeCover(
   doc: Doc,
   preset: DocumentRenderPreset,
@@ -490,6 +514,8 @@ function writeCover(
   } ${producedBy(metadata)}`;
 
   const bottomY = doc.page.height - doc.page.margins.bottom;
+  const hasCoverArtwork = drawCoverArtwork(doc, preset, metadata);
+  const keyFigureOffset = (metadata.keyFigures || []).length > 3 ? 150 : 94;
 
   if (style === "legal") {
     /* Formal centered cover with rule-framed title block. */
@@ -599,7 +625,7 @@ function writeCover(
         });
     }
 
-    y = doc.page.height * 0.26;
+    y = doc.page.height * (hasCoverArtwork ? 0.39 : 0.26);
     if (metadata.projectName) {
       doc
         .font(t.fontFamilyBold)
@@ -647,7 +673,7 @@ function writeCover(
 
     // Key figures near the bottom.
     if (preset.keyFigures.enabled && (metadata.keyFigures || []).length) {
-      writeKeyFigureStrip(doc, preset, metadata, bottomY - 92);
+      writeKeyFigureStrip(doc, preset, metadata, bottomY - keyFigureOffset);
     }
     if (metadata.confidentiality) {
       doc
@@ -670,7 +696,7 @@ function writeCover(
       const w = metadata.logo.width * scale;
       drawLogo(doc, metadata, x + width - w, y - 4, h);
     }
-    y = doc.page.height * 0.22;
+    y = doc.page.height * (hasCoverArtwork ? 0.37 : 0.22);
 
     if (metadata.projectName) {
       doc
@@ -696,7 +722,7 @@ function writeCover(
       .text(line, x, y, { width });
 
     if (preset.keyFigures.enabled && (metadata.keyFigures || []).length) {
-      writeKeyFigureStrip(doc, preset, metadata, bottomY - 96);
+      writeKeyFigureStrip(doc, preset, metadata, bottomY - keyFigureOffset);
     }
     doc
       .font(t.fontFamily)
@@ -736,7 +762,7 @@ function writeCover(
         });
     }
 
-    y = doc.page.height * 0.3;
+    y = doc.page.height * (hasCoverArtwork ? 0.42 : 0.3);
     if (metadata.projectName) {
       doc
         .font(t.fontFamilyBold)
@@ -787,7 +813,7 @@ function writeCover(
         });
     }
 
-    let stripTop = bottomY - 92;
+    const stripTop = bottomY - keyFigureOffset;
     if (preset.keyFigures.enabled && (metadata.keyFigures || []).length) {
       writeKeyFigureStrip(doc, preset, metadata, stripTop);
     }
@@ -828,6 +854,15 @@ function writeToc(
 
   doc
     .font(t.fontFamilyBold)
+    .fontSize(7.5)
+    .fillColor(preset.colors.faint)
+    .text(language === "fr" ? "STRUCTURE DU DOCUMENT" : "DOCUMENT OUTLINE", x, undefined, {
+      width,
+      characterSpacing: 1.2,
+    });
+  doc.moveDown(0.45);
+  doc
+    .font(t.fontFamilyBold)
     .fontSize(t.h2Size + 2)
     .fillColor(preset.colors.accent)
     .text(tocTitle(language), x, undefined, { width });
@@ -841,25 +876,41 @@ function writeToc(
 
   let sectionIndex = 0;
   for (const heading of headings) {
-    if (doc.y + 20 > bottomLimit(doc)) doc.addPage();
+    if (doc.y + 26 > bottomLimit(doc)) doc.addPage();
     if (heading.level === 2) {
       sectionIndex += 1;
-      const label = headingHasOwnNumber(heading.text)
-        ? heading.text
-        : `${sectionIndex}.  ${heading.text}`;
+      const hasNumber = headingHasOwnNumber(heading.text);
+      const rowY = doc.y;
+      doc
+        .font(t.fontFamilyBold)
+        .fontSize(8.5)
+        .fillColor(preset.colors.accent)
+        .text(hasNumber ? "" : String(sectionIndex).padStart(2, "0"), x, rowY, {
+          width: 24,
+          lineBreak: false,
+        });
       doc
         .font(t.fontFamilyBold)
         .fontSize(10.5)
         .fillColor(preset.colors.text)
-        .text(label, x, undefined, { width });
-      doc.moveDown(0.35);
+        .text(heading.text, x + (hasNumber ? 0 : 32), rowY, {
+          width: width - (hasNumber ? 0 : 32),
+        });
+      const ruleY = doc.y + 5;
+      doc
+        .moveTo(x + (hasNumber ? 0 : 32), ruleY)
+        .lineTo(x + width, ruleY)
+        .lineWidth(0.35)
+        .strokeColor(preset.colors.rule)
+        .stroke();
+      doc.y = ruleY + 9;
     } else {
       doc
         .font(t.fontFamily)
         .fontSize(9.5)
         .fillColor(preset.colors.muted)
-        .text(heading.text, x + 20, undefined, { width: width - 20 });
-      doc.moveDown(0.25);
+        .text(heading.text, x + 32, undefined, { width: width - 32 });
+      doc.moveDown(0.35);
     }
   }
 
@@ -959,8 +1010,29 @@ export async function markdownToPdfBuffer(
   options: PdfRenderOptions = {}
 ) {
   const preset = resolveRenderPreset(options.presetId, options.orientation);
-  const metadata = options.metadata;
-  const language: "fr" | "en" = metadata?.language || guessLanguage(markdown);
+  const language: "fr" | "en" = options.metadata?.language || guessLanguage(markdown);
+  return compositionToPdfBuffer(
+    composeForExport(markdown, preset, options.metadata, language),
+    options
+  );
+}
+
+export async function compositionToPdfBuffer(
+  composition: CompositionDocument,
+  options: PdfRenderOptions = {}
+) {
+  const preset = resolveRenderPreset(options.presetId, options.orientation);
+  const language = composition.language;
+  const metadata = options.metadata
+    ? {
+        ...options.metadata,
+        keyFigures: composition.cover.metrics?.type === "metric_grid" ? composition.cover.metrics.metrics : [],
+        visuals: composition.cover.hero?.type === "image" ? [imageNodeToRenderVisual(composition.cover.hero, "cover")] : [],
+      }
+    : undefined;
+  const layoutDocument = resolveExportLayout(composition);
+  const flow = layoutNodeFlow(layoutDocument, composition);
+  const blocks = flow.map((item) => nodeToRenderBlock(item.node)).filter((block): block is DocumentBlock => block !== null);
   const mm = preset.page.marginsMm;
 
   return new Promise<Buffer>((resolve, reject) => {
@@ -988,9 +1060,6 @@ export async function markdownToPdfBuffer(
     doc.on("end", () => resolve(Buffer.concat(chunks)));
     doc.on("error", reject);
 
-    let blocks = parseMarkdownBlocks(markdown);
-    if (metadata) blocks = stripLeadingTitle(blocks, metadata.documentTitle);
-
     const hasCover = Boolean(metadata && preset.coverPage.enabled);
     if (metadata && hasCover) {
       writeCover(doc, preset, metadata, language);
@@ -999,42 +1068,16 @@ export async function markdownToPdfBuffer(
       writeToc(doc, preset, blocks, language);
     }
 
-    const visuals = metadata?.visuals || [];
-    const sectionVisuals = groupSectionVisuals(visuals);
-    const usedKeys = new Set<string>();
-
     doc.x = doc.page.margins.left;
-    for (const block of blocks) {
-      writeBlock(doc, preset, block, language);
-      if (block.type === "heading" && block.level >= 2) {
-        const key = normalizeHeading(plainText(block.text));
-        const matches = sectionVisuals.get(key);
-        if (matches && !usedKeys.has(key)) {
-          usedKeys.add(key);
-          for (const visual of matches) writeVisual(doc, preset, visual);
-        }
+    for (const item of flow) {
+      const node = item.node;
+      if (item.breakBefore && !atTopOfPage(doc)) doc.addPage();
+      if (node.type === "image") {
+        writeVisual(doc, preset, imageNodeToRenderVisual(node));
+        continue;
       }
-    }
-
-    // Section visuals whose heading was never matched fall back to the annex,
-    // together with explicit appendix placements.
-    const annexVisuals = [
-      ...visuals.filter((v) => v.target === "appendix"),
-      ...visuals.filter(
-        (v) =>
-          v.target === "section" &&
-          v.sectionTitle &&
-          !usedKeys.has(normalizeHeading(v.sectionTitle))
-      ),
-    ];
-    if (annexVisuals.length) {
-      writeBlock(
-        doc,
-        preset,
-        { type: "heading", level: 2, text: visualAnnexTitle(language) },
-        language
-      );
-      for (const visual of annexVisuals) writeVisual(doc, preset, visual);
+      const block = nodeToRenderBlock(node);
+      if (block) writeBlock(doc, preset, block, language);
     }
 
     if (metadata && preset.headerFooter.enabled) {

@@ -223,23 +223,25 @@ export async function updatePlacement(
   return serializePlacement(updated);
 }
 
-/** Approved + enabled body placements, with what the export needs. */
+/** Approved + enabled placements, including dedicated cover artwork. */
 export async function listApprovedPlacementsForExport(documentId: string) {
   return prisma.documentVisualPlacement.findMany({
     where: {
       documentId,
       isApproved: true,
       isEnabled: true,
-      target: { in: ["section", "appendix"] },
+      target: { in: ["cover", "section", "appendix"] },
     },
     orderBy: { orderIndex: "asc" },
     select: {
       target: true,
+      role: true,
+      position: true,
       size: true,
       caption: true,
       section: { select: { title: true } },
       resource: {
-        select: { filename: true, mimeType: true, storageUrl: true },
+        select: { id: true, filename: true, mimeType: true, storageUrl: true },
       },
     },
   });

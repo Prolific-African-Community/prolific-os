@@ -7,7 +7,10 @@
     "start": "next start",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
-    "prisma:deploy": "prisma migrate deploy"
+    "prisma:deploy": "prisma migrate deploy",
+    "test:export-quality": "ts-node --project tsconfig.scripts.json scripts/export-quality-smoke.ts",
+    "test:composition": "ts-node --project tsconfig.scripts.json scripts/composition-engine-smoke.ts",
+    "test:layout": "ts-node --project tsconfig.scripts.json scripts/layout-engine-smoke.ts"
   },
   "prisma": {
     "seed": "ts-node --compiler-options {\"module\":\"CommonJS\",\"types\":[\"node\"]} prisma/seed.ts"

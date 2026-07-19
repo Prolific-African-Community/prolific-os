@@ -127,6 +127,7 @@ export default withAuth(
         logo,
         visuals,
         language,
+        documentPlan: document.documentPlan,
       });
 
       const filename = `${slugify(project.name)}_${slugify(

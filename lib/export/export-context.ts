@@ -164,10 +164,13 @@ const MAX_EXPORT_VISUALS = 12;
 
 export interface PlacementForExport {
   target: string;
+  role?: string;
+  position?: string;
   size: string | null;
   caption: string | null;
   section: { title: string } | null;
   resource: {
+    id?: string;
     filename: string;
     mimeType: string;
     storageUrl: string | null;
@@ -180,7 +183,8 @@ const asVisualSize = (value: string | null): VisualSize =>
     : "medium";
 
 /**
- * Fetch the bytes for approved+enabled placements (section/appendix only).
+ * Fetch the bytes for approved+enabled placements. Cover artwork remains a
+ * first-class visual so renderers can compose it differently from figures.
  * Skips anything that fails — the export must still succeed.
  */
 export async function loadPlacementVisuals(
@@ -188,7 +192,11 @@ export async function loadPlacementVisuals(
 ): Promise<RenderVisual[]> {
   const out: RenderVisual[] = [];
   for (const placement of placements.slice(0, MAX_EXPORT_VISUALS)) {
-    if (placement.target !== "section" && placement.target !== "appendix") {
+    if (
+      placement.target !== "cover" &&
+      placement.target !== "section" &&
+      placement.target !== "appendix"
+    ) {
       continue;
     }
     const image = await fetchImageBytes(
@@ -198,6 +206,10 @@ export async function loadPlacementVisuals(
     if (!image) continue;
     out.push({
       ...image,
+      assetId: placement.resource.id,
+      filename: placement.resource.filename,
+      role: placement.role,
+      position: placement.position,
       target: placement.target,
       sectionTitle:
         placement.target === "section"
@@ -225,6 +237,7 @@ export interface BuildMetadataArgs {
   logo: RenderLogo | null;
   visuals?: RenderVisual[];
   language: "fr" | "en";
+  documentPlan?: unknown;
 }
 
 export function buildRenderMetadata(
@@ -248,6 +261,7 @@ export function buildRenderMetadata(
     keyFigures: args.keyFigures,
     logo: args.logo,
     visuals: args.visuals ?? [],
+    documentPlan: args.documentPlan,
     language: args.language,
   };
 }

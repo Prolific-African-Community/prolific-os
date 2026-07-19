@@ -15,27 +15,28 @@ import {
   ShadingType,
   Table,
   TableCell,
+  TableLayoutType,
+  TableOfContents,
   TableRow,
   TextRun,
   WidthType,
   convertMillimetersToTwip,
 } from "docx";
 import { CellAlign } from "../markdown/table";
+import { CompositionDocument } from "../composition";
 import {
   CalloutKind as StructureCalloutKind,
   DocumentBlock,
   extractHeadings,
-  headingHasOwnNumber,
-  normalizeHeading,
   parseInlineSegments,
-  parseMarkdownBlocks,
   plainText,
-  stripLeadingTitle,
 } from "./document-structure";
+import { composeForExport, imageNodeToRenderVisual, layoutNodeFlow, nodeToRenderBlock, resolveExportLayout } from "./composition-context";
 import {
   DocumentRenderMetadata,
   DocumentRenderPreset,
   PageOrientationOption,
+  RenderKeyFigure,
   RenderVisual,
   VISUAL_SIZE_RATIO,
   calloutLabel,
@@ -45,7 +46,6 @@ import {
   preparedByLabel,
   resolveRenderPreset,
   tocTitle,
-  visualAnnexTitle,
 } from "./rendering-presets";
 
 export interface DocxRenderOptions {
@@ -104,14 +104,27 @@ function buildTable(
   aligns: CellAlign[],
   preset: DocumentRenderPreset
 ): Table {
+  const pageWidthMm = preset.page.orientation === "landscape" ? 297 : 210;
+  const usableTwips = convertMillimetersToTwip(
+    pageWidthMm - preset.page.marginsMm.left - preset.page.marginsMm.right
+  );
+  const columns = Math.max(header.length, 1);
+  const weights = Array.from({ length: columns }, (_, index) => {
+    const values = [header[index] || "", ...rows.map((row) => row[index] || "")];
+    return Math.min(34, Math.max(8, ...values.map((value) => plainText(value).length)));
+  });
+  const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
+  const widths = weights.map((weight) => Math.floor((usableTwips * weight) / totalWeight));
+  widths[widths.length - 1] += usableTwips - widths.reduce((sum, width) => sum + width, 0);
   const border = {
     style: BorderStyle.SINGLE,
     size: 4,
     color: hex(preset.colors.tableBorder),
   };
   const pad = preset.tables.style === "compact" ? 60 : 80;
-  const cell = (text: string, align: CellAlign, isHeader: boolean, zebra: boolean) =>
+  const cell = (text: string, align: CellAlign, isHeader: boolean, zebra: boolean, width: number) =>
     new TableCell({
+      width: { size: width, type: WidthType.DXA },
       margins: { top: pad, bottom: pad, left: 110, right: 110 },
       shading: isHeader
         ? {
@@ -139,7 +152,9 @@ function buildTable(
     });
 
   return new Table({
-    width: { size: 100, type: WidthType.PERCENTAGE },
+    width: { size: usableTwips, type: WidthType.DXA },
+    columnWidths: widths,
+    layout: TableLayoutType.FIXED,
     borders: {
       top: border,
       bottom: border,
@@ -152,14 +167,14 @@ function buildTable(
       new TableRow({
         tableHeader: preset.tables.repeatHeader,
         cantSplit: preset.tables.avoidPageBreakInside,
-        children: header.map((h, i) => cell(h, aligns[i] || "left", true, false)),
+        children: header.map((h, i) => cell(h, aligns[i] || "left", true, false, widths[i])),
       }),
       ...rows.map(
         (row, rowIndex) =>
           new TableRow({
             cantSplit: preset.tables.avoidPageBreakInside,
             children: row.map((c, i) =>
-              cell(c, aligns[i] || "left", false, rowIndex % 2 === 1)
+              cell(c, aligns[i] || "left", false, rowIndex % 2 === 1, widths[i])
             ),
           })
       ),
@@ -338,17 +353,22 @@ function keyFigureStrip(
     size: 4,
     color: hex(preset.colors.rule),
   };
+  const columns = Math.min(figures.length, 3);
+  const rows: RenderKeyFigure[][] = [];
+  for (let index = 0; index < figures.length; index += columns) {
+    rows.push(figures.slice(index, index + columns));
+  }
   return [
     new Table({
       width: { size: 100, type: WidthType.PERCENTAGE },
       borders: { ...NO_BORDERS, top: topRule },
-      rows: [
+      rows: rows.map((row) =>
         new TableRow({
           cantSplit: true,
-          children: figures.map(
+          children: row.map(
             (figure) =>
               new TableCell({
-                margins: { top: 140, bottom: 60, left: 40, right: 40 },
+                margins: { top: 160, bottom: 120, left: 110, right: 110 },
                 children: [
                   new Paragraph({
                     spacing: { after: 40 },
@@ -365,7 +385,7 @@ function keyFigureStrip(
                     children: [
                       new TextRun({
                         text: figure.label.toUpperCase(),
-                        size: pt(7.5),
+                      size: pt(8),
                         color: hex(preset.colors.muted),
                       }),
                     ],
@@ -373,8 +393,8 @@ function keyFigureStrip(
                 ],
               })
           ),
-        }),
-      ],
+        })
+      ),
     }),
   ];
 }
@@ -439,20 +459,6 @@ function visualParagraphs(
   }
 }
 
-function groupSectionVisuals(
-  visuals: RenderVisual[]
-): Map<string, RenderVisual[]> {
-  const map = new Map<string, RenderVisual[]>();
-  for (const visual of visuals) {
-    if (visual.target !== "section" || !visual.sectionTitle) continue;
-    const key = normalizeHeading(visual.sectionTitle);
-    const list = map.get(key) || [];
-    list.push(visual);
-    map.set(key, list);
-  }
-  return map;
-}
-
 /* ------------------------------------------------------------- Cover page */
 
 function logoParagraph(
@@ -501,6 +507,7 @@ function coverChildren(
   } ${producedBy(metadata)}`;
 
   const out: (Paragraph | Table)[] = [];
+  const coverVisual = (metadata.visuals || []).find((visual) => visual.target === "cover");
 
   const logo = logoParagraph(metadata, 34, align);
   if (logo) {
@@ -522,8 +529,38 @@ function coverChildren(
     );
   }
 
+  if (coverVisual && !isLegal) {
+    const maxWidth = 520;
+    const maxHeight = 175;
+    const scale = Math.min(maxWidth / coverVisual.width, maxHeight / coverVisual.height);
+    try {
+      out.push(
+        new Paragraph({
+          alignment: AlignmentType.RIGHT,
+          spacing: { before: 160, after: 180 },
+          children: [
+            new ImageRun({
+              type: coverVisual.mime === "image/png" ? "png" : "jpg",
+              data: coverVisual.buffer,
+              transformation: {
+                width: Math.round(coverVisual.width * scale),
+                height: Math.round(coverVisual.height * scale),
+              },
+            }),
+          ],
+        })
+      );
+    } catch {
+      // Invalid cover artwork never blocks the export.
+    }
+  }
+
   // Push the title block down the page.
-  out.push(new Paragraph({ spacing: { before: isLegal ? 2400 : 2800 } }));
+  out.push(
+    new Paragraph({
+      spacing: { before: isLegal ? 2400 : coverVisual ? 520 : 2200 },
+    })
+  );
 
   if (metadata.projectName) {
     out.push(
@@ -644,11 +681,11 @@ function tocChildren(
   blocks: DocumentBlock[],
   preset: DocumentRenderPreset,
   language: "fr" | "en"
-): Paragraph[] {
+): (Paragraph | TableOfContents)[] {
   const headings = extractHeadings(blocks, preset.tableOfContents.maxDepth);
   if (!headings.length) return [];
 
-  const out: Paragraph[] = [
+  const out: (Paragraph | TableOfContents)[] = [
     new Paragraph({
       spacing: { after: 280 },
       border: {
@@ -668,30 +705,31 @@ function tocChildren(
       ],
     }),
   ];
+  out.push(
+    new TableOfContents(tocTitle(language), {
+      hyperlink: true,
+      headingStyleRange: `2-${preset.tableOfContents.maxDepth}`,
+      pageNumbersEntryLevelsRange: `2-${preset.tableOfContents.maxDepth}`,
+      entryAndPageNumberSeparator: "tab",
+    })
+  );
 
-  let sectionIndex = 0;
-  for (const heading of headings) {
-    if (heading.level === 2) sectionIndex += 1;
-    const numbered =
-      heading.level === 2 && !headingHasOwnNumber(heading.text)
-        ? `${sectionIndex}.  ${heading.text}`
-        : heading.text;
-    out.push(
-      new Paragraph({
-        spacing: { after: heading.level === 2 ? 110 : 70 },
-        indent: heading.level === 3 ? { left: 420 } : undefined,
-        children: [
-          new TextRun({
-            text: numbered,
-            size: pt(heading.level === 2 ? 10.5 : 9.5),
-            bold: heading.level === 2,
-            color:
-              heading.level === 3 ? hex(preset.colors.muted) : undefined,
-          }),
-        ],
-      })
-    );
-  }
+  out.push(
+    new Paragraph({
+      spacing: { before: 180, after: 80 },
+      children: [
+        new TextRun({
+          text:
+            language === "fr"
+              ? "Dans Word, cliquez avec le bouton droit puis choisissez Mettre à jour le champ pour afficher les numéros de page."
+              : "In Word, right-click and choose Update Field to refresh page numbers.",
+          size: pt(7.5),
+          italics: true,
+          color: hex(preset.colors.faint),
+        }),
+      ],
+    })
+  );
 
   out.push(new Paragraph({ children: [new PageBreak()] }));
   return out;
@@ -793,12 +831,30 @@ export async function markdownToDocxBuffer(
   options: DocxRenderOptions = {}
 ) {
   const preset = resolveRenderPreset(options.presetId, options.orientation);
-  const metadata = options.metadata;
-  const language: "fr" | "en" = metadata?.language || guessLanguage(markdown);
-  const t = preset.typography;
+  const language: "fr" | "en" = options.metadata?.language || guessLanguage(markdown);
+  return compositionToDocxBuffer(
+    composeForExport(markdown, preset, options.metadata, language),
+    options
+  );
+}
 
-  let blocks = parseMarkdownBlocks(markdown);
-  if (metadata) blocks = stripLeadingTitle(blocks, metadata.documentTitle);
+export async function compositionToDocxBuffer(
+  composition: CompositionDocument,
+  options: DocxRenderOptions = {}
+) {
+  const preset = resolveRenderPreset(options.presetId, options.orientation);
+  const language = composition.language;
+  const t = preset.typography;
+  const metadata = options.metadata
+    ? {
+        ...options.metadata,
+        keyFigures: composition.cover.metrics?.type === "metric_grid" ? composition.cover.metrics.metrics : [],
+        visuals: composition.cover.hero?.type === "image" ? [imageNodeToRenderVisual(composition.cover.hero, "cover")] : [],
+      }
+    : undefined;
+  const layoutDocument = resolveExportLayout(composition);
+  const flow = layoutNodeFlow(layoutDocument, composition);
+  const blocks = flow.map((item) => nodeToRenderBlock(item.node)).filter((block): block is DocumentBlock => block !== null);
 
   const children: (Paragraph | Table)[] = [];
   if (metadata && preset.coverPage.enabled) {
@@ -807,49 +863,20 @@ export async function markdownToDocxBuffer(
   if (metadata && preset.tableOfContents.enabled) {
     children.push(...tocChildren(blocks, preset, language));
   }
-  const visuals = metadata?.visuals || [];
-  const sectionVisuals = groupSectionVisuals(visuals);
-  const usedKeys = new Set<string>();
-
-  for (const block of blocks) {
-    children.push(...blockToChildren(block, preset, language));
-    if (block.type === "heading" && block.level >= 2) {
-      const key = normalizeHeading(plainText(block.text));
-      const matches = sectionVisuals.get(key);
-      if (matches && !usedKeys.has(key)) {
-        usedKeys.add(key);
-        for (const visual of matches) {
-          children.push(...visualParagraphs(visual, preset));
-        }
-      }
+  for (const item of flow) {
+    const node = item.node;
+    if (item.breakBefore) children.push(new Paragraph({ children: [new PageBreak()] }));
+    if (node.type === "image") {
+      children.push(...visualParagraphs(imageNodeToRenderVisual(node), preset));
+      continue;
     }
+    const block = nodeToRenderBlock(node);
+    if (block) children.push(...blockToChildren(block, preset, language));
   }
 
   // Unmatched section visuals + explicit appendix placements → visual annex.
-  const annexVisuals = [
-    ...visuals.filter((v) => v.target === "appendix"),
-    ...visuals.filter(
-      (v) =>
-        v.target === "section" &&
-        v.sectionTitle &&
-        !usedKeys.has(normalizeHeading(v.sectionTitle))
-    ),
-  ];
-  if (annexVisuals.length) {
-    children.push(
-      ...blockToChildren(
-        { type: "heading", level: 2, text: visualAnnexTitle(language) },
-        preset,
-        language
-      )
-    );
-    for (const visual of annexVisuals) {
-      children.push(...visualParagraphs(visual, preset));
-    }
-  }
-
   if (!children.length) {
-    children.push(new Paragraph({ children: inlineRuns(markdown) }));
+    children.push(new Paragraph({ children: inlineRuns(composition.title) }));
   }
 
   const mm = preset.page.marginsMm;

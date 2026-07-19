@@ -302,11 +302,16 @@ export const VISUAL_SIZE_RATIO: Record<VisualSize, number> = {
 };
 
 export interface RenderVisual {
+  assetId?: string;
+  filename?: string;
+  role?: string;
+  position?: string;
   buffer: Buffer;
   mime: "image/png" | "image/jpeg";
   width: number;
   height: number;
-  target: "section" | "appendix";
+  /** Cover visuals are composed as hero artwork and never reused in the body. */
+  target: "cover" | "section" | "appendix";
   sectionTitle: string | null;
   size: VisualSize;
   caption: string | null;
@@ -330,6 +335,8 @@ export interface DocumentRenderMetadata {
   logo?: RenderLogo | null;
   keyFigures?: RenderKeyFigure[];
   visuals?: RenderVisual[];
+  /** Optional transient blueprint context consumed by the composition engine. */
+  documentPlan?: unknown;
   /** "fr" | "en" — drives fixed labels like the TOC title. */
   language?: "fr" | "en";
 }
